@@ -11,6 +11,8 @@ class Drop {
   final String? mediaUrl;
   final int unlockRadiusM;
   final double distanceM;
+  final double? dropLat;
+  final double? dropLng;
   final bool isUnlocked;
   final DateTime createdAt;
 
@@ -22,6 +24,8 @@ class Drop {
     required this.mediaUrl,
     required this.unlockRadiusM,
     required this.distanceM,
+    this.dropLat,
+    this.dropLng,
     required this.isUnlocked,
     required this.createdAt,
   });
@@ -35,12 +39,13 @@ class Drop {
       mediaUrl: map['media_url'] as String?,
       unlockRadiusM: (map['unlock_radius_m'] as num).toInt(),
       distanceM: (map['distance_m'] as num).toDouble(),
+      dropLat: (map['drop_lat'] as num?)?.toDouble(),
+      dropLng: (map['drop_lng'] as num?)?.toDouble(),
       isUnlocked: map['is_unlocked'] as bool,
       createdAt: DateTime.parse(map['created_at'] as String),
     );
   }
 
-  /// Human-friendly distance label for locked drops, e.g. "180m away".
   String get distanceLabel {
     if (distanceM < 1000) {
       return '${distanceM.round()}m away';
