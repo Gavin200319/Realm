@@ -137,8 +137,52 @@ class SupabaseService {
   }
 
   // ---------------------------------------------------------------
-  // Profile
+  // Interactions (likes + comments)
   // ---------------------------------------------------------------
+
+  Future<List<Map<String, dynamic>>> fetchInteractions({
+    required String dropId,
+  }) async {
+    final rows = await _client
+        .from('drop_interactions')
+        .select('*, profiles(username)')
+        .eq('drop_id', dropId)
+        .order('created_at', ascending: true);
+    return List<Map<String, dynamic>>.from(rows);
+  }
+
+  Future<void> addLike({required String dropId}) async {
+    await _client.from('drop_interactions').insert({
+      'user_id': currentUser!.id,
+      'drop_id': dropId,
+      'type': 'like',
+      'content': null,
+    });
+  }
+
+  Future<void> removeLike({required String dropId}) async {
+    await _client
+        .from('drop_interactions')
+        .delete()
+        .eq('drop_id', dropId)
+        .eq('user_id', currentUser!.id)
+        .eq('type', 'like');
+  }
+
+  Future<void> addComment({
+    required String dropId,
+    required String content,
+  }) async {
+    // Comments bypass the unique(user_id, drop_id, type) constraint
+    // by using a raw insert with upsert disabled — multiple comments
+    // per user on same drop are fine.
+    await _client.from('drop_interactions').insert({
+      'user_id': currentUser!.id,
+      'drop_id': dropId,
+      'type': 'comment',
+      'content': content,
+    });
+  }
 
   Future<ProfileStats?> fetchProfileStats(String userId) async {
     final row = await _client
