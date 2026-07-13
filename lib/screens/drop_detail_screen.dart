@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/drop.dart';
 import '../services/supabase_service.dart';
+import 'reactions_screen.dart';
 
 class DropDetailScreen extends StatefulWidget {
   final Drop drop;
@@ -98,6 +99,16 @@ class _DropDetailScreenState extends State<DropDetailScreen> {
               const SizedBox(height: 8),
               Text('by ${drop.creatorUsername}',
                   style: Theme.of(context).textTheme.bodySmall),
+              const SizedBox(height: 24),
+              OutlinedButton.icon(
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => ReactionsScreen(dropId: drop.id),
+                  ),
+                ),
+                icon: const Icon(Icons.favorite_border),
+                label: const Text('Reactions & Comments'),
+              ),
             ],
           ],
         ),
