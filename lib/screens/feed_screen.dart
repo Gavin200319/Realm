@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import '../models/drop.dart';
@@ -7,9 +8,6 @@ import 'create_drop_screen.dart';
 import 'profile_screen.dart';
 import 'drop_detail_screen.dart';
 
-/// The core-loop screen: shows Drops near the user, locked ones show
-/// distance only, unlocked ones show full content. This is the entire
-/// v1 product — no map/AR/marketplace tabs, just this loop.
 class FeedScreen extends StatefulWidget {
   const FeedScreen({super.key});
 
@@ -22,34 +20,57 @@ class _FeedScreenState extends State<FeedScreen> {
   Position? _position;
   bool _loading = true;
   String? _error;
+  StreamSubscription<Position>? _positionSub;
 
   @override
   void initState() {
     super.initState();
-    _refresh();
+    _initLocation();
   }
 
-  Future<void> _refresh() async {
+  @override
+  void dispose() {
+    _positionSub?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _initLocation() async {
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
+      // Get an immediate fresh fix first
       final position = await LocationService.instance.getCurrentPosition();
-      final drops = await SupabaseService.instance.fetchNearbyDrops(
-        lat: position.latitude,
-        lng: position.longitude,
+      setState(() => _position = position);
+      await _fetchDrops(position);
+
+      // Then stream updates — re-fetches drops every time user moves 5m
+      _positionSub = LocationService.instance.watchPosition().listen(
+        (pos) async {
+          setState(() => _position = pos);
+          await _fetchDrops(pos);
+        },
+        onError: (_) {}, // silently ignore stream errors
       );
-      setState(() {
-        _position = position;
-        _drops = drops;
-      });
     } catch (e) {
       setState(() => _error = e.toString());
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
+
+  Future<void> _fetchDrops(Position position) async {
+    try {
+      final drops = await SupabaseService.instance.fetchNearbyDrops(
+        lat: position.latitude,
+        lng: position.longitude,
+      );
+      if (mounted) setState(() => _drops = drops);
+    } catch (_) {}
+  }
+
+  Future<void> _refresh() => _initLocation();
 
   Future<void> _openDrop(Drop drop) async {
     if (_position == null) return;
@@ -62,14 +83,26 @@ class _FeedScreenState extends State<FeedScreen> {
         ),
       ),
     );
-    _refresh(); // re-fetch in case this unlocked something
+    if (_position != null) await _fetchDrops(_position!);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Nearby Drops'),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Nearby Drops'),
+            if (_position != null)
+              Text(
+                'GPS: ${_position!.latitude.toStringAsFixed(5)}, '
+                '${_position!.longitude.toStringAsFixed(5)} '
+                '± ${_position!.accuracy.round()}m',
+                style: const TextStyle(fontSize: 10, color: Colors.grey),
+              ),
+          ],
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.person_outline),
@@ -94,7 +127,7 @@ class _FeedScreenState extends State<FeedScreen> {
               ),
             ),
           );
-          _refresh();
+          if (_position != null) await _fetchDrops(_position!);
         },
         icon: const Icon(Icons.add_location_alt_outlined),
         label: const Text('Drop here'),
@@ -104,7 +137,16 @@ class _FeedScreenState extends State<FeedScreen> {
 
   Widget _buildBody() {
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 12),
+            Text('Getting your location...'),
+          ],
+        ),
+      );
     }
     if (_error != null) {
       return Center(
@@ -197,6 +239,11 @@ class _DropCard extends StatelessWidget {
                   ],
                 ),
               ),
+              if (locked && drop.isWithinUnlockRange)
+                const Padding(
+                  padding: EdgeInsets.only(left: 8),
+                  child: Icon(Icons.near_me, color: Colors.amber, size: 18),
+                ),
             ],
           ),
         ),
