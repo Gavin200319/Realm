@@ -130,48 +130,46 @@ class _MapScreenState extends State<MapScreen> {
       textAllowOverlap: true,
     ));
 
-    // Register tap listener
-    map.onMapTapListener = _handleMapTap;
+    // Use onMapTapListener — no context clash, use widget's own context
+    map.onMapTapListener = (MapContentGestureContext tapContext) async {
+      await _handleMapTap(tapContext);
+    };
   }
 
-  void _handleMapTap(MapContentGestureContext context) async {
+  Future<void> _handleMapTap(MapContentGestureContext tapContext) async {
     final map = _mapboxMap;
     final pos = _position;
     if (map == null || pos == null) return;
 
     final features = await map.queryRenderedFeatures(
-      RenderedQueryGeometry.fromScreenCoordinate(context.touchPosition),
+      RenderedQueryGeometry.fromScreenCoordinate(tapContext.touchPosition),
       RenderedQueryOptions(layerIds: ['drops-locked', 'drops-unlocked']),
     );
 
     if (features.isEmpty) return;
 
-    // properties is Object? — cast safely to Map
+    // Properties come back as Map<String, Object?> — cast explicitly
     final rawProps = features.first?.queriedFeature.feature['properties'];
     if (rawProps == null) return;
-    final props = rawProps as Map<Object?, Object?>;
+    final props = rawProps as Map<String, Object?>;
 
-    final dropId = props['id']?.toString();
+    final dropId = props['id'] as String?;
     if (dropId == null) return;
 
-    Drop? drop;
     try {
-      drop = _drops.firstWhere((d) => d.id == dropId);
-    } catch (_) {
-      return;
-    }
-
-    if (!mounted) return;
-    await Navigator.of(this.context).push(
-      MaterialPageRoute(
-        builder: (_) => DropDetailScreen(
-          drop: drop!,
-          currentLat: pos.latitude,
-          currentLng: pos.longitude,
+      final drop = _drops.firstWhere((d) => d.id == dropId);
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => DropDetailScreen(
+            drop: drop,
+            currentLat: pos.latitude,
+            currentLng: pos.longitude,
+          ),
         ),
-      ),
-    );
-    await _loadDrops(pos);
+      );
+      await _loadDrops(pos);
+    } catch (_) {}
   }
 
   Future<void> _updateDropPins() async {
@@ -228,7 +226,6 @@ class _MapScreenState extends State<MapScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final pos = _position;
     return Scaffold(
       body: Stack(
         children: [
@@ -237,8 +234,8 @@ class _MapScreenState extends State<MapScreen> {
             cameraOptions: CameraOptions(
               center: Point(
                 coordinates: Position(
-                  pos?.longitude ?? 36.8219,
-                  pos?.latitude ?? -1.2921,
+                  _position?.longitude ?? 36.8219,
+                  _position?.latitude ?? -1.2921,
                 ),
               ),
               zoom: 14.0,
