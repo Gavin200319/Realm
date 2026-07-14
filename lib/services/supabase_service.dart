@@ -111,29 +111,74 @@ class SupabaseService {
     required double lng,
     required String caption,
     String? mediaUrl,
+    String? mediaType,
     int unlockRadiusM = 50,
+    String visibility = 'public',
   }) async {
     final user = currentUser;
     if (user == null) throw Exception('Must be signed in to create a drop.');
 
     await _client.from('drops').insert({
       'creator_id': user.id,
-      // PostGIS geography(Point) accepts WKT via this cast in PostgREST.
       'location': 'SRID=4326;POINT($lng $lat)',
       'caption': caption,
       'media_url': mediaUrl,
+      'media_type': mediaType,
       'unlock_radius_m': unlockRadiusM,
+      'visibility': visibility,
     });
   }
 
-  Future<String> uploadDropPhoto({required Uint8List bytes}) async {
+  Future<String> uploadDropMedia({
+    required Uint8List bytes,
+    required String mediaType, // 'photo', 'video', 'document'
+    String extension = 'jpg',
+  }) async {
     final user = currentUser;
     if (user == null) throw Exception('Must be signed in to upload media.');
 
     final fileName =
-        '${user.id}/${DateTime.now().millisecondsSinceEpoch}.jpg';
+        '${user.id}/${DateTime.now().millisecondsSinceEpoch}.$extension';
     await _client.storage.from('drop-media').uploadBinary(fileName, bytes);
     return _client.storage.from('drop-media').getPublicUrl(fileName);
+  }
+
+  /// Grant a specific user access to a private drop by username.
+  /// Returns false if the username doesn't exist.
+  Future<bool> grantDropAccess({
+    required String dropId,
+    required String username,
+  }) async {
+    final result = await _client.rpc('grant_drop_access', params: {
+      'target_drop_id': dropId,
+      'target_username': username,
+    });
+    return result as bool;
+  }
+
+  /// Search profiles by username prefix — used for the access allowlist
+  /// picker when creating a private drop.
+  Future<List<Map<String, dynamic>>> searchUsers(String query) async {
+    if (query.length < 2) return [];
+    final rows = await _client
+        .from('profiles')
+        .select('id, username, display_name')
+        .ilike('username', '$query%')
+        .limit(10);
+    return List<Map<String, dynamic>>.from(rows);
+  }
+
+  /// Returns the most recently created drop id by a user.
+  /// Used after createDrop to grant allowlist access.
+  Future<String?> fetchLatestDropId(String userId) async {
+    final row = await _client
+        .from('drops')
+        .select('id')
+        .eq('creator_id', userId)
+        .order('created_at', ascending: false)
+        .limit(1)
+        .maybeSingle();
+    return row?['id'] as String?;
   }
 
   // ---------------------------------------------------------------

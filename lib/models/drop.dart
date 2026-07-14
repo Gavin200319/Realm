@@ -1,14 +1,14 @@
-/// A single Drop returned from the `nearby_drops` RPC.
-///
-/// If [isUnlocked] is false, [caption] and [mediaUrl] will be null —
-/// the server never sends locked content to the client at all, so
-/// there's nothing to accidentally leak in the UI layer.
+enum DropVisibility { public, private }
+enum DropMediaType { photo, video, document }
+
 class Drop {
   final String id;
   final String creatorId;
   final String creatorUsername;
   final String? caption;
   final String? mediaUrl;
+  final DropMediaType? mediaType;
+  final DropVisibility visibility;
   final int unlockRadiusM;
   final double distanceM;
   final double? dropLat;
@@ -22,6 +22,8 @@ class Drop {
     required this.creatorUsername,
     required this.caption,
     required this.mediaUrl,
+    required this.mediaType,
+    required this.visibility,
     required this.unlockRadiusM,
     required this.distanceM,
     this.dropLat,
@@ -37,6 +39,10 @@ class Drop {
       creatorUsername: map['creator_username'] as String? ?? 'unknown',
       caption: map['caption'] as String?,
       mediaUrl: map['media_url'] as String?,
+      mediaType: _parseMediaType(map['media_type'] as String?),
+      visibility: (map['visibility'] as String?) == 'private'
+          ? DropVisibility.private
+          : DropVisibility.public,
       unlockRadiusM: (map['unlock_radius_m'] as num).toInt(),
       distanceM: (map['distance_m'] as num).toDouble(),
       dropLat: (map['drop_lat'] as num?)?.toDouble(),
@@ -46,12 +52,20 @@ class Drop {
     );
   }
 
-  String get distanceLabel {
-    if (distanceM < 1000) {
-      return '${distanceM.round()}m away';
+  static DropMediaType? _parseMediaType(String? raw) {
+    switch (raw) {
+      case 'photo': return DropMediaType.photo;
+      case 'video': return DropMediaType.video;
+      case 'document': return DropMediaType.document;
+      default: return null;
     }
+  }
+
+  String get distanceLabel {
+    if (distanceM < 1000) return '${distanceM.round()}m away';
     return '${(distanceM / 1000).toStringAsFixed(1)}km away';
   }
 
   bool get isWithinUnlockRange => distanceM <= unlockRadiusM;
+  bool get isPrivate => visibility == DropVisibility.private;
 }

@@ -89,12 +89,67 @@ class _DropDetailScreenState extends State<DropDetailScreen> {
                     : const Text('Try to unlock'),
               ),
             ] else ...[
-              if (drop.mediaUrl != null)
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: Image.network(drop.mediaUrl!),
+              if (drop.mediaUrl != null) ...[
+                if (drop.mediaType == DropMediaType.photo)
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.network(drop.mediaUrl!),
+                  )
+                else if (drop.mediaType == DropMediaType.video)
+                  Container(
+                    height: 180,
+                    decoration: BoxDecoration(
+                      color: Colors.black45,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.play_circle_outline, size: 56),
+                          const SizedBox(height: 8),
+                          TextButton(
+                            onPressed: () {
+                              // TODO: open video player in v3
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Video player coming in v3')),
+                              );
+                            },
+                            child: const Text('Tap to play video'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                else if (drop.mediaType == DropMediaType.document)
+                  ListTile(
+                    leading: const Icon(Icons.insert_drive_file, size: 40),
+                    title: const Text('Attached document'),
+                    subtitle: const Text('Tap to open'),
+                    onTap: () {
+                      // TODO: open document viewer in v3
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Document viewer coming in v3')),
+                      );
+                    },
+                  ),
+                const SizedBox(height: 16),
+              ],
+              if (drop.isPrivate)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.lock, size: 14, color: Colors.purple),
+                      const SizedBox(width: 4),
+                      Text('Private drop',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(color: Colors.purple)),
+                    ],
+                  ),
                 ),
-              const SizedBox(height: 16),
               Text(drop.caption ?? '', style: Theme.of(context).textTheme.bodyLarge),
               const SizedBox(height: 8),
               Text('by ${drop.creatorUsername}',

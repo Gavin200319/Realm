@@ -239,10 +239,15 @@ class _DropCard extends StatelessWidget {
                   ],
                 ),
               ),
-              if (locked && drop.isWithinUnlockRange)
+            if (locked && drop.isWithinUnlockRange)
                 const Padding(
                   padding: EdgeInsets.only(left: 8),
                   child: Icon(Icons.near_me, color: Colors.amber, size: 18),
+                ),
+              if (drop.isPrivate)
+                const Padding(
+                  padding: EdgeInsets.only(left: 8),
+                  child: Icon(Icons.lock, color: Colors.purple, size: 16),
                 ),
             ],
           ),
