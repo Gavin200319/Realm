@@ -7,7 +7,10 @@ import 'package:http/http.dart' as http;
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import '../models/drop.dart';
 import '../services/location_service.dart';
+import '../services/onboarding_service.dart';
 import '../services/supabase_service.dart';
+import '../theme/rm_theme.dart';
+import '../widgets/tutorial_overlay.dart';
 import 'drop_detail_screen.dart';
 
 class MapScreen extends StatefulWidget {
@@ -17,7 +20,7 @@ class MapScreen extends StatefulWidget {
   State<MapScreen> createState() => _MapScreenState();
 }
 
-class _MapScreenState extends State<MapScreen> {
+class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   MapboxMap? _mapboxMap;
   geo.Position? _position;
   List<Drop> _drops = [];
@@ -25,18 +28,40 @@ class _MapScreenState extends State<MapScreen> {
   bool _ready = false;
   Drop? _selectedDrop;
   bool _loadingRoute = false;
+  bool _showTutorial = false;
+
+  // Bottom sheet animation
+  late AnimationController _sheetCtrl;
+  late Animation<Offset> _sheetSlide;
 
   @override
   void initState() {
     super.initState();
     MapboxOptions.setAccessToken(dotenv.env['MAPBOX_ACCESS_TOKEN']!);
+
+    _sheetCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 320),
+    );
+    _sheetSlide = Tween<Offset>(
+      begin: const Offset(0, 1),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _sheetCtrl, curve: Curves.easeOutCubic));
+
     _initLocation();
+    _checkTutorial();
   }
 
   @override
   void dispose() {
     _positionSub?.cancel();
+    _sheetCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _checkTutorial() async {
+    final show = await OnboardingService.instance.shouldShowMapTutorial();
+    if (mounted) setState(() => _showTutorial = show);
   }
 
   Future<void> _initLocation() async {
@@ -61,9 +86,7 @@ class _MapScreenState extends State<MapScreen> {
         radiusM: 10000,
       );
       setState(() => _drops = drops);
-      if (_mapboxMap != null && _ready) {
-        await _updateDropPins();
-      }
+      if (_mapboxMap != null && _ready) await _updateDropPins();
     } catch (e) {
       debugPrint('Drops load error: $e');
     }
@@ -75,15 +98,13 @@ class _MapScreenState extends State<MapScreen> {
     await mapboxMap.gestures.updateSettings(
       GesturesSettings(rotateEnabled: true, pitchEnabled: false),
     );
-
     await mapboxMap.logo.updateSettings(LogoSettings(enabled: false));
     await mapboxMap.attribution
         .updateSettings(AttributionSettings(enabled: false));
-
     await mapboxMap.location.updateSettings(LocationComponentSettings(
       enabled: true,
       pulsingEnabled: true,
-      pulsingColor: 0xFF6C4FF6,
+      pulsingColor: 0xFF7B61FF,
     ));
 
     setState(() => _ready = true);
@@ -99,60 +120,48 @@ class _MapScreenState extends State<MapScreen> {
     final map = _mapboxMap;
     if (map == null) return;
 
-    // ── Drop pins source ──────────────────────────────────────────
+    // Drop pins source
     await map.style.addSource(GeoJsonSource(
       id: 'drops-source',
       data: json.encode(_buildDropGeoJson([])),
     ));
 
-    // Locked drops — grey circle
+    // Locked drop — muted circle
     await map.style.addLayer(CircleLayer(
       id: 'drops-locked',
       sourceId: 'drops-source',
       filter: ['==', ['get', 'unlocked'], false],
       circleRadius: 14.0,
-      circleColor: 0xFF757575,
-      circleStrokeWidth: 2.5,
-      circleStrokeColor: 0xFFFFFFFF,
+      circleColor: 0xFF2A2A3A,
+      circleStrokeWidth: 2.0,
+      circleStrokeColor: 0xFF8888A8,
     ));
 
-    // Unlocked drops — purple circle
+    // Unlocked drop — violet circle
     await map.style.addLayer(CircleLayer(
       id: 'drops-unlocked',
       sourceId: 'drops-source',
       filter: ['==', ['get', 'unlocked'], true],
       circleRadius: 14.0,
-      circleColor: 0xFF6C4FF6,
-      circleStrokeWidth: 2.5,
+      circleColor: 0xFF7B61FF,
+      circleStrokeWidth: 2.0,
       circleStrokeColor: 0xFFFFFFFF,
     ));
 
-    // Distance label above each pin
+    // Distance label using token syntax
     await map.style.addLayer(SymbolLayer(
-      id: 'drops-distance-label',
+      id: 'drops-label',
       sourceId: 'drops-source',
-      textField: ['get', 'distance_label'],
+      textField: '{distance_label}',
       textSize: 11.0,
-      textOffset: [0.0, -2.2],
+      textOffset: [0.0, -2.5],
       textColor: 0xFFFFFFFF,
-      textHaloColor: 0xFF000000,
+      textHaloColor: 0xFF0A0A0F,
       textHaloWidth: 1.5,
       textAllowOverlap: false,
-      textIgnorePlacement: false,
     ));
 
-    // Lock icon on locked pins
-    await map.style.addLayer(SymbolLayer(
-      id: 'drops-lock-icon',
-      sourceId: 'drops-source',
-      filter: ['==', ['get', 'unlocked'], false],
-      textField: '🔒',
-      textSize: 10.0,
-      textOffset: [0.0, 0.0],
-      textAllowOverlap: true,
-    ));
-
-    // ── Route source + layer ──────────────────────────────────────
+    // Route source + layer
     await map.style.addSource(GeoJsonSource(
       id: 'route-source',
       data: json.encode({'type': 'FeatureCollection', 'features': []}),
@@ -161,14 +170,24 @@ class _MapScreenState extends State<MapScreen> {
     await map.style.addLayer(LineLayer(
       id: 'route-line',
       sourceId: 'route-source',
-      lineColor: 0xFF6C4FF6,
+      lineColor: 0xFF7B61FF,
       lineWidth: 5.0,
-      lineOpacity: 0.85,
+      lineOpacity: 0.9,
       lineCap: LineCap.ROUND,
       lineJoin: LineJoin.ROUND,
     ));
 
-    // Tap listener
+    // Dashed overlay on route for style
+    await map.style.addLayer(LineLayer(
+      id: 'route-dash',
+      sourceId: 'route-source',
+      lineColor: 0xFFFFFFFF,
+      lineWidth: 1.5,
+      lineOpacity: 0.4,
+      lineDasharray: [2.0, 4.0],
+      lineCap: LineCap.ROUND,
+    ));
+
     map.onMapTapListener = _handleMapTap;
   }
 
@@ -183,8 +202,8 @@ class _MapScreenState extends State<MapScreen> {
     );
 
     if (features.isEmpty) {
-      // Tapped empty area — clear route and selection
       await _clearRoute();
+      _sheetCtrl.reverse();
       setState(() => _selectedDrop = null);
       return;
     }
@@ -198,16 +217,14 @@ class _MapScreenState extends State<MapScreen> {
     try {
       final drop = _drops.firstWhere((d) => d.id == dropId);
       setState(() => _selectedDrop = drop);
+      _sheetCtrl.forward();
       await _drawRoute(pos, drop);
     } catch (_) {}
   }
 
-  /// Fetches the walking route from user to drop using Mapbox Directions API
-  /// and draws it on the map.
   Future<void> _drawRoute(geo.Position from, Drop to) async {
     if (to.dropLat == null || to.dropLng == null) return;
     setState(() => _loadingRoute = true);
-
     try {
       final token = dotenv.env['MAPBOX_ACCESS_TOKEN']!;
       final url = Uri.parse(
@@ -226,23 +243,17 @@ class _MapScreenState extends State<MapScreen> {
 
       final geometry = routes.first['geometry'] as Map<String, dynamic>;
 
-      // Update route source with the returned LineString
       await _mapboxMap?.style.setStyleSourceProperty(
         'route-source',
         'data',
         json.encode({
           'type': 'FeatureCollection',
           'features': [
-            {
-              'type': 'Feature',
-              'geometry': geometry,
-              'properties': {},
-            }
+            {'type': 'Feature', 'geometry': geometry, 'properties': {}}
           ],
         }),
       );
 
-      // Fit camera to show both user and drop
       await _fitCameraToRoute(from, to);
     } catch (e) {
       debugPrint('Route error: $e');
@@ -260,20 +271,16 @@ class _MapScreenState extends State<MapScreen> {
     final minLng = [from.longitude, to.dropLng!].reduce((a, b) => a < b ? a : b);
     final maxLng = [from.longitude, to.dropLng!].reduce((a, b) => a > b ? a : b);
 
-    await map.cameraForCoordinateBounds(
+    final camera = await map.cameraForCoordinateBounds(
       CoordinateBounds(
         southwest: Point(coordinates: Position(minLng - 0.001, minLat - 0.001)),
         northeast: Point(coordinates: Position(maxLng + 0.001, maxLat + 0.001)),
         infiniteBounds: false,
       ),
-      MbxEdgeInsets(top: 80, left: 40, bottom: 200, right: 40),
-      null,
-      null,
-      null,
-      null,
-    ).then((camera) async {
-      await map.flyTo(camera, MapAnimationOptions(duration: 800));
-    });
+      MbxEdgeInsets(top: 80, left: 40, bottom: 220, right: 40),
+      null, null, null, null,
+    );
+    await map.flyTo(camera, MapAnimationOptions(duration: 900));
   }
 
   Future<void> _clearRoute() async {
@@ -307,12 +314,12 @@ class _MapScreenState extends State<MapScreen> {
                 'type': 'Feature',
                 'geometry': {
                   'type': 'Point',
+                  // GeoJSON = [longitude, latitude] — accurate real coords
                   'coordinates': [d.dropLng!, d.dropLat!],
                 },
                 'properties': {
                   'id': d.id,
                   'unlocked': d.isUnlocked,
-                  'caption': d.caption ?? '',
                   'distance_label': d.distanceLabel,
                   'distance_m': d.distanceM,
                 },
@@ -322,11 +329,9 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<void> _flyToUser() async {
-    final map = _mapboxMap;
     final pos = _position;
-    if (map == null || pos == null) return;
-
-    await map.flyTo(
+    if (_mapboxMap == null || pos == null) return;
+    await _mapboxMap!.flyTo(
       CameraOptions(
         center: Point(coordinates: Position(pos.longitude, pos.latitude)),
         zoom: 15.5,
@@ -337,180 +342,339 @@ class _MapScreenState extends State<MapScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Stack(
-        children: [
-          // Satellite map style
-          MapWidget(
-            onMapCreated: _onMapCreated,
-            styleUri: MapboxStyles.SATELLITE_STREETS,
-            cameraOptions: CameraOptions(
-              center: Point(
-                coordinates: Position(
-                  _position?.longitude ?? 36.8219,
-                  _position?.latitude ?? -1.2921,
-                ),
-              ),
-              zoom: 14.0,
-            ),
-          ),
-
-          // Drop count badge
-          Positioned(
-            top: MediaQuery.of(context).padding.top + 12,
-            left: 16,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: Colors.black87,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                '${_drops.length} drops nearby',
-                style: const TextStyle(color: Colors.white, fontSize: 13),
-              ),
-            ),
-          ),
-
-          // Route loading indicator
-          if (_loadingRoute)
-            Positioned(
-              top: MediaQuery.of(context).padding.top + 12,
-              right: 60,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: Colors.black87,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    SizedBox(
-                      height: 12,
-                      width: 12,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white),
+    final bottomPad = MediaQuery.of(context).padding.bottom;
+    return Stack(
+      children: [
+        Scaffold(
+          body: Stack(
+            children: [
+              // Satellite Streets map
+              MapWidget(
+                onMapCreated: _onMapCreated,
+                styleUri: MapboxStyles.SATELLITE_STREETS,
+                cameraOptions: CameraOptions(
+                  center: Point(
+                    coordinates: Position(
+                      _position?.longitude ?? 36.8219,
+                      _position?.latitude ?? -1.2921,
                     ),
-                    SizedBox(width: 6),
-                    Text('Finding route...',
-                        style: TextStyle(color: Colors.white, fontSize: 12)),
-                  ],
+                  ),
+                  zoom: 14.0,
                 ),
               ),
-            ),
 
-          // Selected drop bottom sheet
-          if (_selectedDrop != null)
-            Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surface,
-                  borderRadius:
-                      const BorderRadius.vertical(top: Radius.circular(16)),
-                  boxShadow: [
-                    BoxShadow(
-                        color: Colors.black.withOpacity(0.3),
-                        blurRadius: 12)
-                  ],
+              // Top badge
+              Positioned(
+                top: MediaQuery.of(context).padding.top + 12,
+                left: 16,
+                child: AnimatedOpacity(
+                  opacity: _drops.isEmpty ? 0 : 1,
+                  duration: const Duration(milliseconds: 400),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: RMColors.surface.withOpacity(0.92),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: RMColors.border),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: const BoxDecoration(
+                            color: RMColors.primary,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          '${_drops.length} drops nearby',
+                          style: const TextStyle(
+                              color: RMColors.textPrimary,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+              ),
+
+              // Route loading
+              if (_loadingRoute)
+                Positioned(
+                  top: MediaQuery.of(context).padding.top + 12,
+                  right: 16,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: RMColors.surface.withOpacity(0.92),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: RMColors.border),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          height: 12,
+                          width: 12,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: RMColors.primary),
+                        ),
+                        SizedBox(width: 6),
+                        Text('Routing…',
+                            style: TextStyle(
+                                color: RMColors.textSecondary,
+                                fontSize: 12)),
+                      ],
+                    ),
+                  ),
+                ),
+
+              // Re-center button
+              Positioned(
+                bottom: _selectedDrop != null ? 200 : 100,
+                right: 16,
+                child: _MapButton(
+                  icon: Icons.my_location_rounded,
+                  onTap: _flyToUser,
+                ),
+              ),
+
+              // Selected drop bottom sheet
+              if (_selectedDrop != null)
+                Positioned(
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  child: SlideTransition(
+                    position: _sheetSlide,
+                    child: _DropSheet(
+                      drop: _selectedDrop!,
+                      loadingRoute: _loadingRoute,
+                      onClose: () async {
+                        await _clearRoute();
+                        _sheetCtrl.reverse();
+                        setState(() => _selectedDrop = null);
+                      },
+                      onOpen: _position == null
+                          ? null
+                          : () => Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => DropDetailScreen(
+                                    drop: _selectedDrop!,
+                                    currentLat: _position!.latitude,
+                                    currentLng: _position!.longitude,
+                                  ),
+                                ),
+                              ),
+                      onRoute: _position == null || _loadingRoute
+                          ? null
+                          : () => _drawRoute(_position!, _selectedDrop!),
+                      bottomPad: bottomPad,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+
+        // Map tutorial
+        if (_showTutorial)
+          TutorialOverlay(
+            steps: const [
+              TutorialStep(
+                icon: Icons.satellite_alt_rounded,
+                title: 'Live satellite map',
+                body: 'You\'re looking at real satellite imagery. Purple pins are unlocked drops, grey pins are locked ones waiting for you to walk to them.',
+              ),
+              TutorialStep(
+                icon: Icons.touch_app_rounded,
+                title: 'Tap any pin',
+                body: 'Tap a drop pin to see its distance and get walking directions. The route draws right on the satellite map.',
+              ),
+              TutorialStep(
+                icon: Icons.directions_walk_rounded,
+                title: 'Walk to unlock',
+                body: 'Follow the route, get within the unlock radius, and tap "Open drop" to reveal what\'s hidden there.',
+              ),
+            ],
+            onDone: () async {
+              await OnboardingService.instance.markMapTutorialSeen();
+              if (mounted) setState(() => _showTutorial = false);
+            },
+          ),
+      ],
+    );
+  }
+}
+
+class _MapButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+
+  const _MapButton({required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          color: RMColors.surface.withOpacity(0.95),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: RMColors.border),
+        ),
+        child: Icon(icon, color: RMColors.textPrimary, size: 20),
+      ),
+    );
+  }
+}
+
+class _DropSheet extends StatelessWidget {
+  final Drop drop;
+  final bool loadingRoute;
+  final VoidCallback onClose;
+  final VoidCallback? onOpen;
+  final VoidCallback? onRoute;
+  final double bottomPad;
+
+  const _DropSheet({
+    required this.drop,
+    required this.loadingRoute,
+    required this.onClose,
+    required this.onOpen,
+    required this.onRoute,
+    required this.bottomPad,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: RMColors.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        border: const Border(top: BorderSide(color: RMColors.border)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.4),
+            blurRadius: 24,
+          ),
+        ],
+      ),
+      padding: EdgeInsets.fromLTRB(20, 12, 20, bottomPad + 16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Handle
+          Container(
+            width: 36,
+            height: 4,
+            decoration: BoxDecoration(
+              color: RMColors.border,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: drop.isUnlocked
+                      ? RMColors.success.withOpacity(0.1)
+                      : RMColors.surfaceAlt,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  drop.isUnlocked
+                      ? Icons.lock_open_rounded
+                      : Icons.lock_rounded,
+                  color: drop.isUnlocked ? RMColors.success : RMColors.textHint,
+                  size: 18,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
                 child: Column(
-                  mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        Icon(
-                          _selectedDrop!.isUnlocked
-                              ? Icons.lock_open
-                              : Icons.lock_outline,
-                          color: _selectedDrop!.isUnlocked
-                              ? Colors.greenAccent
-                              : Colors.grey,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            _selectedDrop!.isUnlocked
-                                ? (_selectedDrop!.caption ?? 'Drop')
-                                : 'Locked Drop',
-                            style: Theme.of(context).textTheme.titleMedium,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.close),
-                          onPressed: () async {
-                            await _clearRoute();
-                            setState(() => _selectedDrop = null);
-                          },
-                        ),
-                      ],
+                    Text(
+                      drop.isUnlocked
+                          ? (drop.caption ?? 'Drop')
+                          : 'Locked drop',
+                      style: const TextStyle(
+                        color: RMColors.textPrimary,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 15,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    Row(
-                      children: [
-                        const Icon(Icons.directions_walk,
-                            size: 16, color: Colors.purple),
-                        const SizedBox(width: 4),
-                        Text(
-                          _selectedDrop!.distanceLabel,
-                          style: TextStyle(
-                              color: Theme.of(context).colorScheme.primary),
-                        ),
-                        const SizedBox(width: 12),
-                        Text('by ${_selectedDrop!.creatorUsername}',
-                            style: Theme.of(context).textTheme.bodySmall),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: FilledButton.icon(
-                            onPressed: _position == null
-                                ? null
-                                : () => Navigator.of(context).push(
-                                      MaterialPageRoute(
-                                        builder: (_) => DropDetailScreen(
-                                          drop: _selectedDrop!,
-                                          currentLat: _position!.latitude,
-                                          currentLng: _position!.longitude,
-                                        ),
-                                      ),
-                                    ),
-                            icon: const Icon(Icons.open_in_new, size: 18),
-                            label: const Text('Open drop'),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        OutlinedButton.icon(
-                          onPressed: _loadingRoute || _position == null
-                              ? null
-                              : () => _drawRoute(_position!, _selectedDrop!),
-                          icon: const Icon(Icons.alt_route, size: 18),
-                          label: const Text('Route'),
-                        ),
-                      ],
+                    const SizedBox(height: 2),
+                    Text(
+                      '${drop.distanceLabel}  ·  by ${drop.creatorUsername}',
+                      style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],
                 ),
               ),
-            ),
-
-          // Re-center button
-          Positioned(
-            bottom: _selectedDrop != null ? 180 : 100,
-            right: 16,
-            child: FloatingActionButton.small(
-              heroTag: 'recenter',
-              onPressed: _flyToUser,
-              child: const Icon(Icons.my_location),
-            ),
+              GestureDetector(
+                onTap: onClose,
+                child: Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: RMColors.surfaceAlt,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.close_rounded,
+                      color: RMColors.textSecondary, size: 16),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                flex: 2,
+                child: FilledButton.icon(
+                  onPressed: onOpen,
+                  icon: const Icon(Icons.open_in_new_rounded, size: 16),
+                  label: const Text('Open drop'),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(0, 46),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: onRoute,
+                  icon: loadingRoute
+                      ? const SizedBox(
+                          height: 14,
+                          width: 14,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: RMColors.primary),
+                        )
+                      : const Icon(Icons.alt_route_rounded, size: 16),
+                  label: const Text('Route'),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(0, 46),
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
