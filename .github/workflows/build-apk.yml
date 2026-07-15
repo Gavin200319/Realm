@@ -78,3 +78,7 @@ jobs:
           name: reality-merge-debug-apk
           path: build/app/outputs/flutter-apk/app-debug.apk
           if-no-files-found: error
+      - name: Build Android APK
+        env:
+            MAPBOX_SDK_TOKEN: ${{ secrets.MAPBOX_SDK_TOKEN }}
+        run: flutter build apk --debug
