@@ -652,7 +652,9 @@ class _DropSheet extends StatelessWidget {
                   icon: const Icon(Icons.open_in_new_rounded, size: 16),
                   label: const Text('Open drop'),
                   style: FilledButton.styleFrom(
-                    minimumSize: const Size(0, 46),
+                  minimumSize: const        MaterialStatePropertyAll<Size>(
+     Size(double.infinity, 46),
+),
                   ),
                 ),
               ),
@@ -670,7 +672,9 @@ class _DropSheet extends StatelessWidget {
                       : const Icon(Icons.alt_route_rounded, size: 16),
                   label: const Text('Route'),
                   style: OutlinedButton.styleFrom(
-                    minimumSize: const Size(0, 46),
+                    minimumSize: const MaterialStatePropertyAll<Size>(
+  Size(double.infinity, 46),
+),
                   ),
                 ),
               ),

@@ -164,9 +164,8 @@ class _ARScreenState extends State<ARScreen> with TickerProviderStateMixin {
     );
 
     final anchor = ARPlaneAnchor(transformation: hit.worldTransform);
-    final didAdd = await _anchorManager!.addAnchor(anchor);
-    if (!didAdd) return;
-
+    final didAdd = await arObjectManager?.addNode(node) ?? false;
+if (!didAdd) return;
     // Create a glowing box node
     final node = ARNode(
       type: NodeType.webGLB,
@@ -177,7 +176,7 @@ class _ARScreenState extends State<ARScreen> with TickerProviderStateMixin {
     );
 
     final didAddNode = await _objectManager!.addNode(node, planeAnchor: anchor);
-    if (didAddNode) {
+   if (didAddNode ?? false) {
       _anchors[_dropToPlace!.id] = anchor;
       setState(() {
         _placingMode = false;
