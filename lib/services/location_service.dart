@@ -34,18 +34,14 @@ class LocationService {
     // Step 3 — get fresh fix with timeout fallback
     try {
       return await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.bestForNavigation,
-          timeLimit: Duration(seconds: 10),
-        ),
+        desiredAccuracy: LocationAccuracy.bestForNavigation,
+        timeLimit: const Duration(seconds: 10),
       );
     } on TimeoutException {
       final last = await Geolocator.getLastKnownPosition();
       if (last != null) return last;
       return await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.medium,
-        ),
+        desiredAccuracy: LocationAccuracy.medium,
       );
     }
   }
