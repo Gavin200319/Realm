@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:ar_flutter_plugin_2/ar_flutter_plugin.dart';
 import 'package:ar_flutter_plugin_2/datatypes/config_planedetection.dart';
 import 'package:ar_flutter_plugin_2/datatypes/hittest_result_types.dart';
@@ -13,10 +16,12 @@ import 'package:ar_flutter_plugin_2/models/ar_hittest_result.dart';
 import 'package:ar_flutter_plugin_2/models/ar_node.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart' as geo;
+import 'package:google_mlkit_image_labeling/google_mlkit_image_labeling.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 import 'package:vector_math/vector_math_64.dart' as vm;
 import '../models/drop.dart';
+import '../services/drop_events.dart';
 import '../services/location_service.dart';
 import '../services/supabase_service.dart';
 import '../theme/rm_theme.dart';
@@ -48,9 +53,19 @@ class _ARScreenState extends State<ARScreen> with TickerProviderStateMixin {
   // Compass
   double _heading = 0;
   StreamSubscription? _compassSub;
+  StreamSubscription? _dropCreatedSub;
 
   // Placed anchors map: drop.id → anchor
   final Map<String, ARAnchor> _anchors = {};
+  // Placed anchors' confirmed surface label: drop.id → label (e.g. "Table")
+  // Not persisted server-side yet — see note in _showSurfaceConfirmSheet.
+  final Map<String, String> _anchorLabels = {};
+
+  // On-device surface classifier. Created lazily on first use since it
+  // loads a model file — no need to pay that cost if the user never
+  // places anything in Surface mode.
+  ImageLabeler? _imageLabeler;
+  bool _classifying = false;
 
   // Place-drop mode
   bool _placingMode = false;
@@ -71,6 +86,13 @@ class _ARScreenState extends State<ARScreen> with TickerProviderStateMixin {
       duration: const Duration(milliseconds: 1500),
     )..repeat(reverse: true);
     _pulseAnim = CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut);
+    _dropCreatedSub = DropEvents.instance.onDropCreated.listen((_) {
+      // ARScreen may be kept alive in HomeShell's IndexedStack even
+      // while another tab is visible — refetch so drops are current
+      // next time this tab is shown, without waiting for a full
+      // re-init.
+      _refetchNearbyDrops();
+    });
     _init();
   }
 
@@ -78,7 +100,9 @@ class _ARScreenState extends State<ARScreen> with TickerProviderStateMixin {
   void dispose() {
     _pulseCtrl.dispose();
     _compassSub?.cancel();
+    _dropCreatedSub?.cancel();
     _sessionManager?.dispose();
+    _imageLabeler?.close();
     super.dispose();
   }
 
@@ -107,14 +131,23 @@ class _ARScreenState extends State<ARScreen> with TickerProviderStateMixin {
     try {
       final position = await LocationService.instance.getCurrentPosition();
       setState(() => _position = position);
-      final drops = await SupabaseService.instance.fetchNearbyDrops(
-        lat: position.latitude,
-        lng: position.longitude,
-        radiusM: 200, // AR mode — only very nearby drops
-      );
-      setState(() => _drops = drops);
+      await _refetchNearbyDrops();
     } catch (e) {
       setState(() => _error = e.toString());
+    }
+  }
+
+  Future<void> _refetchNearbyDrops() async {
+    if (_position == null) return;
+    try {
+      final drops = await SupabaseService.instance.fetchNearbyDrops(
+        lat: _position!.latitude,
+        lng: _position!.longitude,
+        radiusM: 200, // AR mode — only very nearby drops
+      );
+      if (mounted) setState(() => _drops = drops);
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString());
     }
   }
 
@@ -157,12 +190,215 @@ class _ARScreenState extends State<ARScreen> with TickerProviderStateMixin {
       return;
     }
 
-    // Place the selected drop as an AR node
+    if (_classifying) return; // ignore taps while a scan is in flight
+
     final hit = hits.firstWhere(
       (h) => h.type == ARHitTestResultType.plane,
       orElse: () => hits.first,
     );
 
+    setState(() {
+      _classifying = true;
+      _statusMessage = 'Scanning surface…';
+    });
+
+    List<ImageLabel> labels = [];
+    try {
+      final bytes = await _captureArSnapshotBytes();
+      if (bytes != null) {
+        labels = await _classifySnapshot(bytes);
+      }
+    } catch (e) {
+      debugPrint('Surface scan error: $e');
+      // Fall through with an empty label list — the confirm sheet still
+      // lets the user pick manually, so a classification failure
+      // doesn't block placement.
+    }
+
+    if (!mounted) return;
+    setState(() => _classifying = false);
+
+    final confirmedLabel = await _showSurfaceConfirmSheet(labels);
+    if (confirmedLabel == null) {
+      // User cancelled — stay in placing mode, don't place anything.
+      setState(() => _statusMessage = 'Tap a detected surface to place this drop');
+      return;
+    }
+
+    await _placeAnchor(hit, confirmedLabel);
+  }
+
+  /// Grabs a still frame of the current AR scene via ARSessionManager's
+  /// snapshot() and returns it as PNG bytes ready for ML Kit. This is the
+  /// only frame-access point ar_flutter_plugin_2 exposes — there's no
+  /// live video stream out of the plugin, so classification only happens
+  /// at the moment of a tap, not continuously.
+  Future<Uint8List?> _captureArSnapshotBytes() async {
+    if (_sessionManager == null) return null;
+    final provider = await _sessionManager!.snapshot();
+
+    final completer = Completer<ui.Image>();
+    final stream = provider.resolve(const ImageConfiguration());
+    late ImageStreamListener listener;
+    listener = ImageStreamListener(
+      (info, _) {
+        completer.complete(info.image);
+        stream.removeListener(listener);
+      },
+      onError: (err, st) {
+        if (!completer.isCompleted) completer.completeError(err, st);
+        stream.removeListener(listener);
+      },
+    );
+    stream.addListener(listener);
+
+    final uiImage = await completer.future;
+    final byteData = await uiImage.toByteData(format: ui.ImageByteFormat.png);
+    return byteData?.buffer.asUint8List();
+  }
+
+  Future<List<ImageLabel>> _classifySnapshot(Uint8List pngBytes) async {
+    _imageLabeler ??= ImageLabeler(
+      options: ImageLabelerOptions(confidenceThreshold: 0.4),
+    );
+
+    // ML Kit's InputImage reads most reliably from a file path — write
+    // the snapshot to a scratch temp file, classify, then clean up.
+    final file = File(
+      '${Directory.systemTemp.path}/rm_ar_snapshot_${DateTime.now().millisecondsSinceEpoch}.png',
+    );
+    await file.writeAsBytes(pngBytes);
+    try {
+      final labels = await _imageLabeler!.processImage(
+        InputImage.fromFilePath(file.path),
+      );
+      labels.sort((a, b) => b.confidence.compareTo(a.confidence));
+      return labels.take(3).toList();
+    } finally {
+      unawaited(file.delete().catchError((_) {}));
+    }
+  }
+
+  /// Shows the AI's best guesses and lets the user confirm one, pick a
+  /// quick alternative, or type a custom label. Returns the confirmed
+  /// label, or null if the user cancelled.
+  Future<String?> _showSurfaceConfirmSheet(List<ImageLabel> labels) async {
+    final customCtrl = TextEditingController();
+    const quickPicks = ['Table', 'Chair', 'Shelf', 'Floor', 'Wall', 'Desk'];
+
+    return showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: RMColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 20,
+            bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 20,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('What surface is this?',
+                  style: TextStyle(
+                      color: RMColors.textPrimary,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700)),
+              const SizedBox(height: 4),
+              Text(
+                labels.isEmpty
+                    ? "Couldn't get a confident read — pick or type one."
+                    : 'AI best guess, confirm or change it:',
+                style: const TextStyle(
+                    color: RMColors.textSecondary, fontSize: 12),
+              ),
+              const SizedBox(height: 14),
+              if (labels.isNotEmpty)
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: labels
+                      .map((l) => ActionChip(
+                            backgroundColor: RMColors.primaryDim,
+                            label: Text(
+                              '${l.label} ${(l.confidence * 100).round()}%',
+                              style: const TextStyle(
+                                  color: RMColors.primary,
+                                  fontWeight: FontWeight.w600),
+                            ),
+                            onPressed: () =>
+                                Navigator.of(sheetContext).pop(l.label),
+                          ))
+                      .toList(),
+                ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: quickPicks
+                    .map((p) => ActionChip(
+                          backgroundColor: RMColors.surfaceAlt,
+                          label: Text(p,
+                              style: const TextStyle(
+                                  color: RMColors.textPrimary, fontSize: 12)),
+                          onPressed: () =>
+                              Navigator.of(sheetContext).pop(p),
+                        ))
+                    .toList(),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: customCtrl,
+                style: const TextStyle(color: RMColors.textPrimary),
+                decoration: const InputDecoration(
+                  hintText: 'Or type your own label…',
+                  hintStyle: TextStyle(color: RMColors.textHint),
+                ),
+                onSubmitted: (v) {
+                  if (v.trim().isNotEmpty) {
+                    Navigator.of(sheetContext).pop(v.trim());
+                  }
+                },
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.of(sheetContext).pop(null),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: () {
+                        final v = customCtrl.text.trim();
+                        Navigator.of(sheetContext).pop(
+                          v.isNotEmpty
+                              ? v
+                              : (labels.isNotEmpty ? labels.first.label : null),
+                        );
+                      },
+                      child: const Text('Confirm'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _placeAnchor(ARHitTestResult hit, String surfaceLabel) async {
     final anchor = ARPlaneAnchor(transformation: hit.worldTransform);
     final didAdd = await _anchorManager!.addAnchor(anchor);
     if (didAdd != true) return;
@@ -179,9 +415,10 @@ class _ARScreenState extends State<ARScreen> with TickerProviderStateMixin {
     final didAddNode = await _objectManager!.addNode(node, planeAnchor: anchor);
     if (didAddNode == true) {
       _anchors[_dropToPlace!.id] = anchor;
+      _anchorLabels[_dropToPlace!.id] = surfaceLabel;
       setState(() {
         _placingMode = false;
-        _statusMessage = 'Drop placed in AR space!';
+        _statusMessage = 'Drop placed on "$surfaceLabel"!';
         _dropToPlace = null;
       });
     }

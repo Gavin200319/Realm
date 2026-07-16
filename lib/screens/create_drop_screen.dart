@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import '../services/supabase_service.dart';
 import '../services/onboarding_service.dart';
+import '../services/drop_events.dart';
 import '../theme/rm_theme.dart';
 import '../widgets/tutorial_overlay.dart';
 import '../widgets/location_autocomplete_field.dart';
@@ -187,6 +188,7 @@ class _CreateDropScreenState extends State<CreateDropScreen>
         }
       }
 
+      DropEvents.instance.notifyDropCreated();
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
       setState(() => _error = e.toString());

@@ -6,6 +6,7 @@ import 'package:geolocator/geolocator.dart' as geo;
 import 'package:http/http.dart' as http;
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart' hide Size;
 import '../models/drop.dart';
+import '../services/drop_events.dart';
 import '../services/location_service.dart';
 import '../services/onboarding_service.dart';
 import '../services/supabase_service.dart';
@@ -25,6 +26,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   geo.Position? _position;
   List<Drop> _drops = [];
   StreamSubscription<geo.Position>? _positionSub;
+  StreamSubscription? _dropCreatedSub;
   bool _ready = false;
   Drop? _selectedDrop;
   bool _loadingRoute = false;
@@ -50,11 +52,18 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
     _initLocation();
     _checkTutorial();
+    _dropCreatedSub = DropEvents.instance.onDropCreated.listen((_) {
+      // MapScreen may be kept alive in HomeShell's IndexedStack even
+      // while another tab is visible — refetch so a newly created drop
+      // shows up without waiting for a manual reload.
+      if (_position != null) _loadDrops(_position!);
+    });
   }
 
   @override
   void dispose() {
     _positionSub?.cancel();
+    _dropCreatedSub?.cancel();
     _sheetCtrl.dispose();
     super.dispose();
   }
