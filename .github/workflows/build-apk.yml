@@ -33,7 +33,11 @@ jobs:
       - name: Enable Android
         run: flutter config --enable-android
 
-      
+      - name: Install Android SDK 36
+        run: |
+          yes | sdkmanager --licenses
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
       - name: Create .env
         run: |
           cat > .env <<EOF
