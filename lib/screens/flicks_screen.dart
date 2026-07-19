@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:video_player/video_player.dart';
 import '../models/flick.dart';
 import '../services/supabase_service.dart';
+import '../services/cached_media.dart';
+import '../services/local_cache_service.dart';
 import '../theme/rm_theme.dart';
 import 'create_flick_screen.dart';
 
@@ -18,10 +21,13 @@ class FlicksScreen extends StatefulWidget {
 }
 
 class FlicksScreenState extends State<FlicksScreen> {
+  static const _cacheKey = 'flicks_feed';
+
   final _pageCtrl = PageController();
   List<Flick> _flicks = [];
   int _currentIndex = 0;
   bool _loading = true;
+  bool _offline = false;
   String? _error;
 
   @override
@@ -41,17 +47,44 @@ class FlicksScreenState extends State<FlicksScreen> {
   Future<void> refresh() => _load();
 
   Future<void> _load() async {
-    setState(() { _loading = true; _error = null; });
+    // 1. Show whatever was cached from last time immediately — no
+    // spinner, no network wait, and it works with zero connection.
+    final cached = await LocalCacheService.instance.loadList(_cacheKey);
+    final hadCache = cached != null && cached.isNotEmpty;
+    if (hadCache && mounted) {
+      setState(() {
+        _flicks = cached.map(Flick.fromMap).toList();
+        _loading = false;
+      });
+    }
+
+    // 2. Refresh from the network in the background. Only replace
+    // what's on screen if this actually succeeds — a failed refresh
+    // (e.g. offline) just leaves the cached posts exactly as they were,
+    // instead of showing an error where content used to be.
+    if (!hadCache) setState(() { _loading = true; _error = null; });
     try {
       final flicks = await SupabaseService.instance.fetchFlicks();
       if (mounted) {
         setState(() {
           _flicks = flicks;
           _currentIndex = 0;
+          _offline = false;
+          _error = null;
         });
       }
+      await LocalCacheService.instance
+          .saveList(_cacheKey, flicks.map((f) => f.toMap()).toList());
     } catch (e) {
-      if (mounted) setState(() => _error = e.toString());
+      if (mounted) {
+        setState(() {
+          if (hadCache) {
+            _offline = true; // keep showing cached posts, just note it
+          } else {
+            _error = e.toString();
+          }
+        });
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -144,6 +177,27 @@ class FlicksScreenState extends State<FlicksScreen> {
                 onPressed: _openCreate,
               ),
             ),
+            if (_offline && _flicks.isNotEmpty)
+              Positioned(
+                top: 44,
+                left: 16,
+                child: Container(
+                  padding: EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.cloud_off_rounded, color: Colors.white70, size: 13),
+                      SizedBox(width: 5),
+                      Text('Offline — showing saved flicks',
+                          style: TextStyle(color: Colors.white70, fontSize: 11)),
+                    ],
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -179,7 +233,15 @@ class _FlickPageState extends State<_FlickPage> {
   }
 
   Future<void> _initController() async {
-    final ctrl = VideoPlayerController.networkUrl(Uri.parse(widget.flick.videoUrl));
+    // Try to resolve (and, if needed, populate) a disk-cached copy of
+    // this video first. A previously-watched flick then plays back
+    // instantly and works with no connection at all; a brand-new one
+    // just downloads once here and is cached for next time.
+    final cachedFile = await CachedMedia.resolve(widget.flick.videoUrl);
+    if (!mounted) return;
+    final ctrl = cachedFile != null
+        ? VideoPlayerController.file(cachedFile)
+        : VideoPlayerController.networkUrl(Uri.parse(widget.flick.videoUrl));
     _controller = ctrl;
     await ctrl.initialize();
     ctrl.setLooping(true);
@@ -247,7 +309,7 @@ class _FlickPageState extends State<_FlickPage> {
               ),
             )
           else if (flick.thumbUrl != null)
-            Image.network(flick.thumbUrl!, fit: BoxFit.cover)
+            CachedNetworkImage(imageUrl: flick.thumbUrl!, fit: BoxFit.cover)
           else
             Center(child: CircularProgressIndicator(color: RMColors.primary)),
 
@@ -325,7 +387,7 @@ class _FlickPageState extends State<_FlickPage> {
                       radius: 15,
                       backgroundColor: RMColors.primaryDim,
                       backgroundImage: flick.creatorAvatarUrl != null
-                          ? NetworkImage(flick.creatorAvatarUrl!)
+                          ? CachedNetworkImageProvider(flick.creatorAvatarUrl!)
                           : null,
                       child: flick.creatorAvatarUrl == null
                           ? Icon(Icons.person_rounded, size: 16, color: RMColors.primary)
@@ -650,7 +712,7 @@ class _FlickCommentsCarouselState extends State<_FlickCommentsCarousel> {
                     radius: 14,
                     backgroundColor: RMColors.primaryDim,
                     backgroundImage:
-                        comment.avatarUrl != null ? NetworkImage(comment.avatarUrl!) : null,
+                        comment.avatarUrl != null ? CachedNetworkImageProvider(comment.avatarUrl!) : null,
                     child: comment.avatarUrl == null
                         ? Icon(Icons.person_rounded, size: 14, color: RMColors.primary)
                         : null,
@@ -774,7 +836,7 @@ class _ReplyTile extends StatelessWidget {
             radius: 10,
             backgroundColor: RMColors.primaryDim,
             backgroundImage:
-                reply.avatarUrl != null ? NetworkImage(reply.avatarUrl!) : null,
+                reply.avatarUrl != null ? CachedNetworkImageProvider(reply.avatarUrl!) : null,
             child: reply.avatarUrl == null
                 ? Icon(Icons.person_rounded, size: 11, color: RMColors.primary)
                 : null,

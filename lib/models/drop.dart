@@ -166,6 +166,37 @@ class Drop {
         DropVisibility.public => 'PUBLIC',
       };
 
+  /// Mirrors [Drop.fromMap]'s field names so a cached drop can be
+  /// written to disk (see LocalCacheService) and read back later with
+  /// no special-casing.
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'creator_id': creatorId,
+        'creator_username': creatorUsername,
+        'caption': caption,
+        'media_url': mediaUrl,
+        'media_type': switch (mediaType) {
+          DropMediaType.photo => 'photo',
+          DropMediaType.video => 'video',
+          DropMediaType.document => 'document',
+          null => null,
+        },
+        'media_size_bytes': mediaSizeBytes,
+        'allow_download': allowDownload,
+        'media_items': mediaItems.map((m) => m.toMap()).toList(),
+        'visibility': switch (visibility) {
+          DropVisibility.private => 'private',
+          DropVisibility.custom => 'custom',
+          DropVisibility.public => 'public',
+        },
+        'unlock_radius_m': unlockRadiusM,
+        'distance_m': distanceM,
+        'drop_lat': dropLat,
+        'drop_lng': dropLng,
+        'is_unlocked': isUnlocked,
+        'created_at': createdAt.toIso8601String(),
+      };
+
   /// Total size across every attachment, or null if none are known.
   int? get totalSizeBytes {
     if (mediaItems.isEmpty) return mediaSizeBytes;

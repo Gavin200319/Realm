@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:intl/intl.dart';
 import '../services/supabase_service.dart';
 
@@ -155,7 +156,7 @@ class _ReactionsScreenState extends State<ReactionsScreen> {
                                   radius: 16,
                                   backgroundImage:
                                       c['profiles']?['avatar_url'] != null
-                                          ? NetworkImage(
+                                          ? CachedNetworkImageProvider(
                                               c['profiles']['avatar_url'] as String)
                                           : null,
                                   child: c['profiles']?['avatar_url'] == null

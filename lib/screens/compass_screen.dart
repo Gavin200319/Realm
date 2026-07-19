@@ -6,6 +6,7 @@ import 'package:sensors_plus/sensors_plus.dart';
 import '../models/drop.dart';
 import '../services/location_service.dart';
 import '../services/supabase_service.dart';
+import '../services/local_cache_service.dart';
 import '../theme/rm_theme.dart';
 import '../widgets/drop_card.dart';
 import 'drop_detail_screen.dart';
@@ -24,6 +25,11 @@ class CompassScreen extends StatefulWidget {
 }
 
 class CompassScreenState extends State<CompassScreen> {
+  // Same key the Explore feed uses (see feed_screen.dart) — both
+  // screens are just different views over "drops near me", so
+  // whichever one refreshes first also warms the other's cache.
+  static const _cacheKey = 'nearby_drops';
+
   StreamSubscription<MagnetometerEvent>? _compassSub;
   StreamSubscription<geo.Position>? _positionSub;
   double _heading = 0;
@@ -35,6 +41,7 @@ class CompassScreenState extends State<CompassScreen> {
   // just already been unlocked, or were the user's own).
   List<Drop> _nearby = [];
   bool _loading = true;
+  bool _offline = false;
   String? _error;
 
   @override
@@ -44,7 +51,20 @@ class CompassScreenState extends State<CompassScreen> {
       final heading = math.atan2(event.y, event.x) * (180 / math.pi);
       if (mounted) setState(() => _heading = (heading + 360) % 360);
     });
+    _loadCachedNearby();
     _init();
+  }
+
+  /// Shows whatever was cached last time immediately, before location
+  /// has even been acquired.
+  Future<void> _loadCachedNearby() async {
+    final cached = await LocalCacheService.instance.loadList(_cacheKey);
+    if (cached != null && cached.isNotEmpty && mounted && _nearby.isEmpty) {
+      setState(() {
+        _nearby = cached.map(Drop.fromMap).toList();
+        _loading = false;
+      });
+    }
   }
 
   @override
@@ -64,7 +84,7 @@ class CompassScreenState extends State<CompassScreen> {
   Future<void> refresh() => _init();
 
   Future<void> _init() async {
-    setState(() { _loading = true; _error = null; });
+    if (_nearby.isEmpty) setState(() { _loading = true; _error = null; });
     try {
       // Reuse an already-running position stream rather than starting a
       // second one on every refresh.
@@ -78,7 +98,13 @@ class CompassScreenState extends State<CompassScreen> {
         _fetchNearby(pos);
       });
     } catch (e) {
-      if (mounted) setState(() => _error = e.toString());
+      if (mounted) {
+        if (_nearby.isNotEmpty) {
+          setState(() => _offline = true);
+        } else {
+          setState(() => _error = e.toString());
+        }
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -91,13 +117,20 @@ class CompassScreenState extends State<CompassScreen> {
         lng: position.longitude,
       );
       if (mounted) {
-        setState(() => _nearby = drops);
+        setState(() { _nearby = drops; _offline = false; });
       }
+      await LocalCacheService.instance
+          .saveList(_cacheKey, drops.map((d) => d.toMap()).toList());
     } catch (e) {
-      // Surface the failure instead of silently leaving the list empty —
-      // a swallowed error here used to look identical to "no drops
-      // nearby", even when the fetch itself was the thing that failed.
-      if (mounted) setState(() => _error = e.toString());
+      // Keep whatever's already on screen — cached or previously
+      // fetched — rather than blanking it out over one failed refresh.
+      if (mounted) {
+        if (_nearby.isNotEmpty) {
+          setState(() => _offline = true);
+        } else {
+          setState(() => _error = e.toString());
+        }
+      }
     }
   }
 
@@ -162,9 +195,11 @@ class CompassScreenState extends State<CompassScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Compass'),
-            if (!_loading && _position != null)
+            if (!_loading && (_position != null || (_offline && _nearby.isNotEmpty)))
               Text(
-                '${_nearby.length} drops nearby',
+                _offline
+                    ? '${_nearby.length} drops nearby · offline, showing saved posts'
+                    : '${_nearby.length} drops nearby',
                 style: Theme.of(context).textTheme.labelSmall,
               ),
           ],

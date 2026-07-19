@@ -47,6 +47,22 @@ class Flick {
       createdAt: DateTime.parse(map['created_at'] as String),
     );
   }
+
+  /// Mirrors [Flick.fromMap]'s field names for local caching.
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'creator_id': creatorId,
+        'creator_username': creatorUsername,
+        'creator_avatar_url': creatorAvatarUrl,
+        'caption': caption,
+        'video_url': videoUrl,
+        'thumb_url': thumbUrl,
+        'duration_seconds': durationSeconds,
+        'like_count': likeCount,
+        'comment_count': commentCount,
+        'is_liked': isLiked,
+        'created_at': createdAt.toIso8601String(),
+      };
 }
 
 /// A comment (or, when [parentCommentId] is set, a reply to one) on a

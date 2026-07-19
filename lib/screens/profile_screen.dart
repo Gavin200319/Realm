@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/profile_stats.dart';
@@ -149,7 +150,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                   ),
                                   image: _stats?.avatarUrl != null
                                       ? DecorationImage(
-                                          image: NetworkImage(_stats!.avatarUrl!),
+                                          image: CachedNetworkImageProvider(_stats!.avatarUrl!),
                                           fit: BoxFit.cover,
                                         )
                                       : null,

@@ -5,6 +5,7 @@ import '../models/drop.dart';
 import '../services/location_service.dart';
 import '../services/supabase_service.dart';
 import '../services/onboarding_service.dart';
+import '../services/local_cache_service.dart';
 import '../theme/rm_theme.dart';
 import '../widgets/tutorial_overlay.dart';
 import '../widgets/drop_card.dart';
@@ -20,9 +21,12 @@ class FeedScreen extends StatefulWidget {
 }
 
 class FeedScreenState extends State<FeedScreen> with TickerProviderStateMixin {
+  static const _cacheKey = 'nearby_drops';
+
   List<Drop> _drops = [];
   geo.Position? _position;
   bool _loading = true;
+  bool _offline = false;
   String? _error;
   bool _showTutorial = false;
   StreamSubscription<geo.Position>? _positionSub;
@@ -39,8 +43,23 @@ class FeedScreenState extends State<FeedScreen> with TickerProviderStateMixin {
       duration: Duration(milliseconds: 600),
     );
     _fabScale = CurvedAnimation(parent: _fabCtrl, curve: Curves.elasticOut);
+    _loadCachedDrops();
     _initLocation();
     _checkTutorial();
+  }
+
+  /// Shows whatever drops were cached last time immediately, before
+  /// location has even been acquired — so re-opening the app doesn't
+  /// mean staring at a spinner (or, offline, an error) for content
+  /// that was already sitting on the device.
+  Future<void> _loadCachedDrops() async {
+    final cached = await LocalCacheService.instance.loadList(_cacheKey);
+    if (cached != null && cached.isNotEmpty && mounted && _drops.isEmpty) {
+      setState(() {
+        _drops = cached.map(Drop.fromMap).toList();
+        _loading = false;
+      });
+    }
   }
 
   @override
@@ -67,7 +86,7 @@ class FeedScreenState extends State<FeedScreen> with TickerProviderStateMixin {
   }
 
   Future<void> _initLocation() async {
-    setState(() { _loading = true; _error = null; });
+    if (_drops.isEmpty) setState(() { _loading = true; _error = null; });
     try {
       final position = await LocationService.instance.getCurrentPosition();
       setState(() => _position = position);
@@ -84,7 +103,13 @@ class FeedScreenState extends State<FeedScreen> with TickerProviderStateMixin {
         _fetchDrops(pos);
       });
     } catch (e) {
-      setState(() => _error = e.toString());
+      if (_drops.isNotEmpty) {
+        // Already showing cached drops — don't replace them with an
+        // error screen, just note that this refresh didn't go through.
+        setState(() => _offline = true);
+      } else {
+        setState(() => _error = e.toString());
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -112,10 +137,21 @@ class FeedScreenState extends State<FeedScreen> with TickerProviderStateMixin {
         lng: position.longitude,
       );
       _lastFetchAt = DateTime.now();
-      if (mounted && !_sameDrops(_drops, drops)) {
-        setState(() => _drops = drops);
+      if (mounted) {
+        if (!_sameDrops(_drops, drops)) {
+          setState(() { _drops = drops; _offline = false; });
+        } else if (_offline) {
+          setState(() => _offline = false);
+        }
       }
+      // Cache the data itself (not the media — that's disk-cached
+      // separately, see cached_media.dart) so the next app open shows
+      // these same posts instantly instead of waiting on a fresh
+      // fetch, and still shows them at all if that fetch fails.
+      await LocalCacheService.instance
+          .saveList(_cacheKey, drops.map((d) => d.toMap()).toList());
     } catch (_) {
+      if (mounted && _drops.isNotEmpty) setState(() => _offline = true);
     } finally {
       _fetchInFlight = false;
     }
@@ -167,9 +203,11 @@ class FeedScreenState extends State<FeedScreen> with TickerProviderStateMixin {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('Explore'),
-                if (_position != null)
+                if (_position != null || (_offline && _drops.isNotEmpty))
                   Text(
-                    '${_drops.length} drops nearby',
+                    _offline
+                        ? '${_drops.length} drops nearby · offline, showing saved posts'
+                        : '${_drops.length} drops nearby',
                     style: Theme.of(context).textTheme.labelSmall,
                   ),
               ],

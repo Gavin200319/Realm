@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:intl/intl.dart';
 import '../services/supabase_service.dart';
 import '../theme/rm_theme.dart';
@@ -202,7 +203,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
                     radius: 22,
                     backgroundColor: RMColors.primaryDim,
                     backgroundImage: c['other_avatar_url'] != null
-                        ? NetworkImage(c['other_avatar_url'] as String)
+                        ? CachedNetworkImageProvider(c['other_avatar_url'] as String)
                         : null,
                     child: c['other_avatar_url'] == null
                         ? Icon(Icons.person_rounded, color: RMColors.primary)
@@ -351,7 +352,7 @@ class _NewChatSheetState extends State<_NewChatSheet> {
                     leading: CircleAvatar(
                       backgroundColor: RMColors.primaryDim,
                       backgroundImage: r['avatar_url'] != null
-                          ? NetworkImage(r['avatar_url'] as String)
+                          ? CachedNetworkImageProvider(r['avatar_url'] as String)
                           : null,
                       child: r['avatar_url'] == null
                           ? Icon(Icons.person_rounded, color: RMColors.primary)

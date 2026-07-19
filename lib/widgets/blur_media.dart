@@ -1,5 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../theme/rm_theme.dart';
 
 /// A soft, animated "blur-up" placeholder shown behind media while it
@@ -96,46 +97,34 @@ class BlurUpImage extends StatelessWidget {
       child: SizedBox(
         height: height,
         width: double.infinity,
-        child: Image.network(
-          url,
+        child: CachedNetworkImage(
+          imageUrl: url,
           fit: fit,
-          cacheWidth: cacheWidth,
-          loadingBuilder: (context, child, progress) {
-            if (progress == null) {
-              // Loaded — crossfade in.
-              return AnimatedOpacity(
-                opacity: 1,
-                duration: Duration(milliseconds: 400),
-                curve: Curves.easeOut,
-                child: child,
-              );
-            }
-            return Stack(
-              fit: StackFit.expand,
-              children: [
-                BlurPlaceholder(height: height, icon: Icons.image_rounded),
-                if (progress.expectedTotalBytes != null)
-                  Align(
-                    alignment: Alignment.bottomCenter,
-                    child: Padding(
-                      padding: EdgeInsets.only(bottom: 10),
-                      child: SizedBox(
-                        width: 80,
-                        child: LinearProgressIndicator(
-                          value: progress.cumulativeBytesLoaded /
-                              progress.expectedTotalBytes!,
-                          minHeight: 3,
-                          backgroundColor: Colors.black26,
-                          valueColor: AlwaysStoppedAnimation(
-                              RMColors.primary),
-                        ),
+          memCacheWidth: cacheWidth,
+          fadeInDuration: Duration(milliseconds: 400),
+          progressIndicatorBuilder: (context, url, progress) => Stack(
+            fit: StackFit.expand,
+            children: [
+              BlurPlaceholder(height: height, icon: Icons.image_rounded),
+              if (progress.progress != null)
+                Align(
+                  alignment: Alignment.bottomCenter,
+                  child: Padding(
+                    padding: EdgeInsets.only(bottom: 10),
+                    child: SizedBox(
+                      width: 80,
+                      child: LinearProgressIndicator(
+                        value: progress.progress,
+                        minHeight: 3,
+                        backgroundColor: Colors.black26,
+                        valueColor: AlwaysStoppedAnimation(RMColors.primary),
                       ),
                     ),
                   ),
-              ],
-            );
-          },
-          errorBuilder: (context, error, stack) => Container(
+                ),
+            ],
+          ),
+          errorWidget: (context, url, error) => Container(
             height: height,
             color: RMColors.surfaceAlt,
             child: Center(

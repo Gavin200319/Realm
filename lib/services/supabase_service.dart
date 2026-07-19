@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/drop.dart';
 import '../models/profile_stats.dart';
 import '../models/flick.dart';
+import 'local_cache_service.dart';
 
 /// Thin wrapper around the Supabase client. Keeping all Supabase calls
 /// in one place makes it easy to swap the backend later if v2 ever
@@ -71,7 +72,10 @@ class SupabaseService {
     await _client.auth.signInWithPassword(email: email, password: password);
   }
 
-  Future<void> signOut() => _client.auth.signOut();
+  Future<void> signOut() async {
+    await _client.auth.signOut();
+    await LocalCacheService.instance.clearAll();
+  }
 
   // ---------------------------------------------------------------
   // Drops

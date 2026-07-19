@@ -5,6 +5,7 @@ import 'package:video_player/video_player.dart';
 import '../models/drop.dart';
 import '../services/supabase_service.dart';
 import '../services/drop_events.dart';
+import '../services/cached_media.dart';
 import '../theme/rm_theme.dart';
 import '../widgets/blur_media.dart';
 import 'reactions_screen.dart';
@@ -536,8 +537,10 @@ class _VideoTileState extends State<_VideoTile> {
   }
 
   Future<void> _init() async {
-    final controller =
-        VideoPlayerController.networkUrl(Uri.parse(widget.item.url));
+    final cachedFile = await CachedMedia.resolve(widget.item.url);
+    final controller = cachedFile != null
+        ? VideoPlayerController.file(cachedFile)
+        : VideoPlayerController.networkUrl(Uri.parse(widget.item.url));
     try {
       await controller.initialize();
       await controller.setLooping(true);
