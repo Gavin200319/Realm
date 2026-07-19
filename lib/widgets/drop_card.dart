@@ -111,7 +111,7 @@ class _DropCardState extends State<DropCard> {
                       ),
                     ),
                   ),
-                  if (drop.isPrivate)
+                  if (drop.isRestricted)
                     Container(
                       padding:
                           EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -120,7 +120,7 @@ class _DropCardState extends State<DropCard> {
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
-                        'PRIVATE',
+                        drop.visibilityLabel,
                         style: TextStyle(
                             color: RMColors.primary,
                             fontSize: 9,

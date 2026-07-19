@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/drop.dart';
 import '../models/profile_stats.dart';
+import '../models/flick.dart';
 
 /// Thin wrapper around the Supabase client. Keeping all Supabase calls
 /// in one place makes it easy to swap the backend later if v2 ever
@@ -188,6 +189,14 @@ class SupabaseService {
 
     onProgress?.call(1.0);
     return _client.storage.from('drop-media').getPublicUrl(fileName);
+  }
+
+  /// Deletes a drop. Row-level security (see schema.sql, "Users can
+  /// delete their own drops") means this silently affects zero rows if
+  /// the caller isn't the creator, so callers should still gate the
+  /// delete button on ownership client-side for a sane UX.
+  Future<void> deleteDrop(String dropId) async {
+    await _client.from('drops').delete().eq('id', dropId);
   }
 
   /// Grant a specific user access to a private drop by username.
@@ -398,5 +407,149 @@ class SupabaseService {
   Future<void> markConversationRead(String otherUserId) async {
     await _client.rpc('mark_conversation_read',
         params: {'other_user_id': otherUserId});
+  }
+
+  // ---------------------------------------------------------------
+  // Flicks (short vertical videos, not location-gated)
+  // ---------------------------------------------------------------
+
+  /// The 30-second cap enforced client-side before upload — the
+  /// `duration_seconds` column also has a matching DB check constraint
+  /// as a second line of defense.
+  static const flickMaxDurationSeconds = 30;
+
+  Future<List<Flick>> fetchFlicks({
+    int limit = 20,
+    DateTime? beforeCreatedAt,
+  }) async {
+    final rows = await _client.rpc('fetch_flicks', params: {
+      'limit_count': limit,
+      if (beforeCreatedAt != null)
+        'before_created_at': beforeCreatedAt.toIso8601String(),
+    });
+    return (rows as List)
+        .map((row) => Flick.fromMap(row as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Uploads a flick video (and optional thumbnail) to the same
+  /// `drop-media` bucket used for drop attachments (via the same
+  /// per-user folder as [uploadDropMedia]), then creates the `flicks`
+  /// row.
+  Future<Flick> createFlick({
+    required Uint8List videoBytes,
+    required String extension,
+    required int durationSeconds,
+    String? caption,
+    Uint8List? thumbBytes,
+    void Function(double progress)? onProgress,
+  }) async {
+    final user = currentUser;
+    if (user == null) throw Exception('Must be signed in to post a flick.');
+    if (durationSeconds > flickMaxDurationSeconds) {
+      throw Exception('Flicks can be at most $flickMaxDurationSeconds seconds.');
+    }
+
+    final videoUrl = await uploadDropMedia(
+      bytes: videoBytes,
+      mediaType: 'video',
+      extension: extension,
+      onProgress: onProgress,
+    );
+
+    String? thumbUrl;
+    if (thumbBytes != null) {
+      thumbUrl = await uploadDropMedia(
+        bytes: thumbBytes,
+        mediaType: 'photo',
+        extension: 'jpg',
+      );
+    }
+
+    final row = await _client
+        .from('flicks')
+        .insert({
+          'creator_id': user.id,
+          'caption': caption,
+          'video_url': videoUrl,
+          'thumb_url': thumbUrl,
+          'duration_seconds': durationSeconds,
+        })
+        .select('id, created_at')
+        .single();
+
+    final profile = await _client
+        .from('profiles')
+        .select('username, avatar_url')
+        .eq('id', user.id)
+        .single();
+
+    return Flick(
+      id: row['id'] as String,
+      creatorId: user.id,
+      creatorUsername: profile['username'] as String? ?? 'unknown',
+      creatorAvatarUrl: profile['avatar_url'] as String?,
+      caption: caption,
+      videoUrl: videoUrl,
+      thumbUrl: thumbUrl,
+      durationSeconds: durationSeconds,
+      likeCount: 0,
+      commentCount: 0,
+      isLiked: false,
+      createdAt: DateTime.parse(row['created_at'] as String),
+    );
+  }
+
+  Future<void> deleteFlick(String flickId) async {
+    await _client.from('flicks').delete().eq('id', flickId);
+  }
+
+  /// Toggles the current user's like on a flick. Returns the new
+  /// liked state (true = now liked).
+  Future<bool> toggleFlickLike(String flickId) async {
+    final result =
+        await _client.rpc('toggle_flick_like', params: {'target_flick_id': flickId});
+    return result as bool;
+  }
+
+  /// Top-level comments on a flick, newest first.
+  Future<List<FlickComment>> fetchFlickComments(String flickId) async {
+    final rows = await _client
+        .rpc('fetch_flick_comments', params: {'target_flick_id': flickId});
+    return (rows as List)
+        .map((row) => FlickComment.fromMap(row as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Replies to a single top-level comment, oldest first.
+  Future<List<FlickComment>> fetchCommentReplies(String commentId) async {
+    final rows = await _client
+        .rpc('fetch_comment_replies', params: {'target_comment_id': commentId});
+    return (rows as List)
+        .map((row) => FlickComment.fromMap(row as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Posts a comment (or, with [parentCommentId] set, a reply) and
+  /// returns the new comment's id.
+  Future<String> addFlickComment({
+    required String flickId,
+    required String content,
+    String? parentCommentId,
+  }) async {
+    final id = await _client.rpc('add_flick_comment', params: {
+      'target_flick_id': flickId,
+      'comment_content': content,
+      if (parentCommentId != null) 'parent_comment_id': parentCommentId,
+    });
+    return id as String;
+  }
+
+  /// Toggles the current user's like on a comment or reply. Returns
+  /// the new liked state.
+  Future<bool> toggleCommentLike(String commentId) async {
+    final result = await _client
+        .rpc('toggle_comment_like', params: {'target_comment_id': commentId});
+    return result as bool;
   }
 }

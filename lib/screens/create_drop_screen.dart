@@ -251,32 +251,47 @@ class _CreateDropScreenState extends State<CreateDropScreen>
     }
   }
 
-  /// Pick one or more videos.
+  /// Pick one or more videos. Anything longer than [_maxVideoSeconds] is
+  /// rejected up front — checking duration here (rather than after a
+  /// slow compress+upload) means the user finds out immediately.
+  static const _maxVideoSeconds = 30;
+
   Future<void> _pickVideos() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.video,
       allowMultiple: true,
     );
     if (result == null) return;
+    var rejectedCount = 0;
     for (final f in result.files) {
       if (f.path == null) continue;
-      await _addPicked(File(f.path!), 'video', f.name);
+      final path = f.path!;
+      Duration? duration;
+      try {
+        final info = await VideoCompress.getMediaInfo(path);
+        final ms = info.duration;
+        if (ms != null) duration = Duration(milliseconds: ms.round());
+      } catch (_) {
+        // If duration can't be read, let it through rather than
+        // blocking a valid upload over a probing failure.
+      }
+      if (duration != null && duration.inSeconds > _maxVideoSeconds) {
+        rejectedCount++;
+        continue;
+      }
+      await _addPicked(File(path), 'video', f.name);
+    }
+    if (rejectedCount > 0 && mounted) {
+      setState(() => _error = rejectedCount == 1
+          ? 'That video is longer than 30 seconds — trim it and try again.'
+          : '$rejectedCount videos were longer than 30 seconds and were skipped.');
     }
   }
 
-  /// Pick one or more documents.
-  Future<void> _pickDocuments() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['pdf', 'doc', 'docx', 'txt', 'ppt', 'pptx'],
-      allowMultiple: true,
-    );
-    if (result == null) return;
-    for (final f in result.files) {
-      if (f.path == null) continue;
-      await _addPicked(File(f.path!), 'document', f.name);
-    }
-  }
+  // Document attachments are coming in a future version — the picker
+  // entry point for them has been removed from the UI below, but the
+  // model/backend still understand `mediaType == 'document'` so any
+  // drops created before this change keep working.
 
   void _removeMedia(int index) {
     setState(() => _mediaList.removeAt(index));
@@ -313,9 +328,9 @@ class _CreateDropScreenState extends State<CreateDropScreen>
       setState(() => _error = 'Add a caption before dropping.');
       return;
     }
-    if (_visibility == 'private' && _allowedUsers.isEmpty) {
+    if (_visibility == 'custom' && _allowedUsers.isEmpty) {
       setState(() => _error =
-          'Add at least one person to the allowlist, or set visibility to public.');
+          'Add at least one person to see this, or choose Public/Private instead.');
       return;
     }
     setState(() { _saving = true; _error = null; });
@@ -407,7 +422,7 @@ class _CreateDropScreenState extends State<CreateDropScreen>
       );
 
       // Grant access to allowlist users
-      if (_visibility == 'private' && _allowedUsers.isNotEmpty) {
+      if (_visibility == 'custom' && _allowedUsers.isNotEmpty) {
         final dropId = await SupabaseService.instance
             .fetchLatestDropId(SupabaseService.instance.currentUser!.id);
         if (dropId != null) {
@@ -464,19 +479,11 @@ class _CreateDropScreenState extends State<CreateDropScreen>
                         selected: _mediaList.any((m) => m.mediaType == 'video'),
                         onTap: _pickVideos,
                       ),
-                      SizedBox(width: 10),
-                      _MediaPicker(
-                        icon: Icons.insert_drive_file_rounded,
-                        label: 'Document',
-                        selected:
-                            _mediaList.any((m) => m.mediaType == 'document'),
-                        onTap: _pickDocuments,
-                      ),
                     ],
                   ),
                   SizedBox(height: 6),
                   Text(
-                    'Tap to pick multiple. Long-press Photo to use the camera.',
+                    'Tap to pick multiple. Long-press Photo to use the camera. Videos up to 30s.',
                     style: TextStyle(color: RMColors.textHint, fontSize: 11),
                   ),
                   SizedBox(height: 14),
@@ -549,25 +556,43 @@ class _CreateDropScreenState extends State<CreateDropScreen>
                       style: TextStyle(
                           color: RMColors.textSecondary, fontSize: 13)),
                   SizedBox(height: 10),
-                  Row(
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
                     children: [
                       _VisibilityChip(
                         label: 'Public',
                         icon: Icons.public_rounded,
                         selected: _visibility == 'public',
-                        onTap: () =>
-                            setState(() => _visibility = 'public'),
+                        onTap: () => setState(() {
+                          _visibility = 'public';
+                          _allowedUsers.clear();
+                        }),
                       ),
-                      SizedBox(width: 10),
                       _VisibilityChip(
                         label: 'Private',
                         icon: Icons.lock_rounded,
                         selected: _visibility == 'private',
-                        onTap: () =>
-                            setState(() => _visibility = 'private'),
+                        onTap: () => setState(() {
+                          _visibility = 'private';
+                          _allowedUsers.clear();
+                        }),
+                      ),
+                      _VisibilityChip(
+                        label: 'Specific people',
+                        icon: Icons.group_rounded,
+                        selected: _visibility == 'custom',
+                        onTap: () => setState(() => _visibility = 'custom'),
                       ),
                     ],
                   ),
+                  if (_visibility == 'private') ...[
+                    SizedBox(height: 8),
+                    Text(
+                      'Only you will be able to see and unlock this.',
+                      style: TextStyle(color: RMColors.textHint, fontSize: 12),
+                    ),
+                  ],
 
                   // Allow download
                   if (_mediaList.isNotEmpty) ...[
@@ -579,7 +604,7 @@ class _CreateDropScreenState extends State<CreateDropScreen>
                   ],
 
                   // Allowlist
-                  if (_visibility == 'private') ...[
+                  if (_visibility == 'custom') ...[
                     SizedBox(height: 20),
                     Text('Who can unlock this?',
                         style: TextStyle(
@@ -694,12 +719,12 @@ class _CreateDropScreenState extends State<CreateDropScreen>
               TutorialStep(
                 icon: Icons.perm_media_rounded,
                 title: 'Add any media',
-                body: 'Attach a photo, video, or document. The content stays hidden until someone physically unlocks it.',
+                body: 'Attach a photo or a short video (up to 30 seconds). The content stays hidden until someone physically unlocks it.',
               ),
               TutorialStep(
                 icon: Icons.lock_rounded,
                 title: 'Set visibility',
-                body: 'Public drops are discoverable by everyone. Private drops are only visible to people you add by username.',
+                body: 'Public drops are discoverable by everyone. Private keeps it just for you, or share it with specific people you pick by username.',
               ),
             ],
             onDone: () async {

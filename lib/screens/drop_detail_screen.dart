@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
 import '../models/drop.dart';
 import '../services/supabase_service.dart';
+import '../services/drop_events.dart';
 import '../theme/rm_theme.dart';
 import '../widgets/blur_media.dart';
 import 'reactions_screen.dart';
@@ -26,10 +27,14 @@ class DropDetailScreen extends StatefulWidget {
 
 class _DropDetailScreenState extends State<DropDetailScreen> {
   bool _unlocking = false;
+  bool _deleting = false;
   String? _error;
   late bool _unlocked;
   int _galleryIndex = 0;
   final _pageCtrl = PageController();
+
+  bool get _isOwner =>
+      SupabaseService.instance.currentUser?.id == widget.drop.creatorId;
 
   @override
   void initState() {
@@ -84,6 +89,43 @@ class _DropDetailScreenState extends State<DropDetailScreen> {
     return [];
   }
 
+  Future<void> _confirmDelete() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: RMColors.surface,
+        title: Text('Delete this drop?'),
+        content: Text(
+            'This removes it for everyone, permanently. This can\'t be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text('Delete', style: TextStyle(color: RMColors.danger)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _deleting = true);
+    try {
+      await SupabaseService.instance.deleteDrop(widget.drop.id);
+      DropEvents.instance.notifyDropCreated();
+      if (mounted) Navigator.of(context).pop();
+    } catch (e) {
+      if (mounted) {
+        setState(() => _deleting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Couldn't delete: $e")),
+        );
+      }
+    }
+  }
+
   Future<void> _openOrDownload(String url) async {
     final uri = Uri.parse(url);
     final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -102,6 +144,25 @@ class _DropDetailScreenState extends State<DropDetailScreen> {
       appBar: AppBar(
         title: Text('Drop'),
         backgroundColor: RMColors.background,
+        actions: [
+          if (_isOwner)
+            _deleting
+                ? Padding(
+                    padding: EdgeInsets.all(16),
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: RMColors.danger),
+                    ),
+                  )
+                : IconButton(
+                    icon: Icon(Icons.delete_outline_rounded,
+                        color: RMColors.danger),
+                    tooltip: 'Delete drop',
+                    onPressed: _confirmDelete,
+                  ),
+        ],
       ),
       body: !_unlocked ? _buildLocked(drop) : _buildUnlocked(drop),
     );
@@ -189,7 +250,7 @@ class _DropDetailScreenState extends State<DropDetailScreen> {
             ),
             SizedBox(height: 16),
           ],
-          if (drop.isPrivate)
+          if (drop.isRestricted)
             Padding(
               padding: EdgeInsets.only(bottom: 10),
               child: Row(
@@ -197,7 +258,10 @@ class _DropDetailScreenState extends State<DropDetailScreen> {
                   Icon(Icons.lock_rounded,
                       size: 13, color: RMColors.primary),
                   SizedBox(width: 5),
-                  Text('Private drop',
+                  Text(
+                      drop.isCustom
+                          ? 'Shared with specific people'
+                          : 'Private drop',
                       style: TextStyle(
                           color: RMColors.primary,
                           fontSize: 12,

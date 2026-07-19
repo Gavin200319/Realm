@@ -3,6 +3,7 @@ import '../theme/rm_theme.dart';
 import 'feed_screen.dart';
 import 'compass_screen.dart';
 import 'chats_screen.dart';
+import 'flicks_screen.dart';
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
@@ -23,10 +24,12 @@ class _HomeShellState extends State<HomeShell> {
   // even after switching away and back.
   final _feedKey = GlobalKey<FeedScreenState>();
   final _compassKey = GlobalKey<CompassScreenState>();
+  final _flicksKey = GlobalKey<FlicksScreenState>();
 
   late final _screens = [
     FeedScreen(key: _feedKey),
     CompassScreen(key: _compassKey),
+    FlicksScreen(key: _flicksKey),
     ChatsScreen(),
   ];
 
@@ -38,6 +41,9 @@ class _HomeShellState extends State<HomeShell> {
         break;
       case 1:
         _compassKey.currentState?.refresh();
+        break;
+      case 2:
+        _flicksKey.currentState?.refresh();
         break;
     }
   }
@@ -72,6 +78,13 @@ class _HomeShellState extends State<HomeShell> {
               selectedIcon:
                   Icon(Icons.navigation_rounded, color: RMColors.primary),
               label: 'Compass',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.movie_creation_outlined,
+                  color: RMColors.textSecondary),
+              selectedIcon:
+                  Icon(Icons.movie_creation_rounded, color: RMColors.primary),
+              label: 'Flicks',
             ),
             NavigationDestination(
               icon: Icon(Icons.chat_bubble_outline_rounded,

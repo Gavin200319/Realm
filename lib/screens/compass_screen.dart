@@ -28,7 +28,12 @@ class CompassScreenState extends State<CompassScreen> {
   StreamSubscription<geo.Position>? _positionSub;
   double _heading = 0;
   geo.Position? _position;
-  List<Drop> _nearbyLocked = [];
+  // Every drop within range — locked or already-unlocked — so this tab
+  // never contradicts what Explore/Map show as "nearby". Previously this
+  // only kept the locked subset, which meant the compass could report
+  // "nothing nearby" even while drops clearly existed in range (they'd
+  // just already been unlocked, or were the user's own).
+  List<Drop> _nearby = [];
   bool _loading = true;
   String? _error;
 
@@ -86,10 +91,14 @@ class CompassScreenState extends State<CompassScreen> {
         lng: position.longitude,
       );
       if (mounted) {
-        setState(() =>
-            _nearbyLocked = drops.where((d) => !d.isUnlocked).toList());
+        setState(() => _nearby = drops);
       }
-    } catch (_) {}
+    } catch (e) {
+      // Surface the failure instead of silently leaving the list empty —
+      // a swallowed error here used to look identical to "no drops
+      // nearby", even when the fetch itself was the thing that failed.
+      if (mounted) setState(() => _error = e.toString());
+    }
   }
 
   Future<void> _openDrop(Drop drop) async {
@@ -119,8 +128,15 @@ class CompassScreenState extends State<CompassScreen> {
     return (theta * 180 / math.pi + 360) % 360;
   }
 
-  Drop? get _nearestLocked =>
-      _nearbyLocked.isEmpty ? null : _nearbyLocked.first;
+  Drop? get _nearestLocked {
+    if (_nearby.isEmpty) return null;
+    for (final d in _nearby) {
+      if (!d.isUnlocked) return d;
+    }
+    // Everything nearby is already unlocked — still point at the
+    // closest one rather than showing no needle at all.
+    return _nearby.first;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -148,7 +164,7 @@ class CompassScreenState extends State<CompassScreen> {
             Text('Compass'),
             if (!_loading && _position != null)
               Text(
-                '${_nearbyLocked.length} locked nearby',
+                '${_nearby.length} drops nearby',
                 style: Theme.of(context).textTheme.labelSmall,
               ),
           ],
@@ -194,12 +210,14 @@ class CompassScreenState extends State<CompassScreen> {
                     padding: EdgeInsets.fromLTRB(24, 0, 24, 12),
                     child: target == null
                         ? Text(
-                            'No locked drops nearby right now.',
+                            'No drops nearby right now.',
                             textAlign: TextAlign.center,
                             style: TextStyle(color: RMColors.textSecondary),
                           )
                         : Text(
-                            'Nearest locked drop · ${target.distanceLabel}',
+                            target.isUnlocked
+                                ? 'Nearest drop · ${target.distanceLabel}'
+                                : 'Nearest locked drop · ${target.distanceLabel}',
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               color: RMColors.primary,
@@ -224,7 +242,7 @@ class CompassScreenState extends State<CompassScreen> {
   }
 
   Widget _buildList() {
-    if (_nearbyLocked.isEmpty) {
+    if (_nearby.isEmpty) {
       return LayoutBuilder(
         builder: (context, constraints) => SingleChildScrollView(
           physics: AlwaysScrollableScrollPhysics(),
@@ -237,7 +255,7 @@ class CompassScreenState extends State<CompassScreen> {
                   Icon(Icons.explore_off_rounded,
                       color: RMColors.textHint, size: 48),
                   SizedBox(height: 12),
-                  Text('Nothing locked nearby yet.',
+                  Text('Nothing nearby yet.',
                       style: TextStyle(
                           color: RMColors.textPrimary,
                           fontWeight: FontWeight.w600)),
@@ -255,12 +273,12 @@ class CompassScreenState extends State<CompassScreen> {
     return ListView.builder(
       physics: AlwaysScrollableScrollPhysics(),
       padding: EdgeInsets.fromLTRB(16, 12, 16, 24),
-      itemCount: _nearbyLocked.length,
+      itemCount: _nearby.length,
       itemBuilder: (context, index) => AnimatedDropCard(
-        key: ValueKey(_nearbyLocked[index].id),
-        drop: _nearbyLocked[index],
+        key: ValueKey(_nearby[index].id),
+        drop: _nearby[index],
         index: index,
-        onTap: () => _openDrop(_nearbyLocked[index]),
+        onTap: () => _openDrop(_nearby[index]),
       ),
     );
   }

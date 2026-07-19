@@ -1,4 +1,4 @@
-enum DropVisibility { public, private }
+enum DropVisibility { public, private, custom }
 enum DropMediaType { photo, video, document }
 
 DropMediaType? parseDropMediaType(String? raw) {
@@ -133,9 +133,11 @@ class Drop {
       mediaSizeBytes: (map['media_size_bytes'] as num?)?.toInt(),
       allowDownload: map['allow_download'] as bool? ?? true,
       mediaItems: items,
-      visibility: (map['visibility'] as String?) == 'private'
-          ? DropVisibility.private
-          : DropVisibility.public,
+      visibility: switch (map['visibility'] as String?) {
+        'private' => DropVisibility.private,
+        'custom' => DropVisibility.custom,
+        _ => DropVisibility.public,
+      },
       unlockRadiusM: (map['unlock_radius_m'] as num).toInt(),
       distanceM: (map['distance_m'] as num).toDouble(),
       dropLat: (map['drop_lat'] as num?)?.toDouble(),
@@ -151,7 +153,18 @@ class Drop {
   }
 
   bool get isWithinUnlockRange => distanceM <= unlockRadiusM;
+  /// True only for "just me" private drops.
   bool get isPrivate => visibility == DropVisibility.private;
+  /// True only for drops shared with a hand-picked list of people.
+  bool get isCustom => visibility == DropVisibility.custom;
+  /// True for anything that isn't fully public — used to decide whether
+  /// to show a restricted-access badge.
+  bool get isRestricted => visibility != DropVisibility.public;
+  String get visibilityLabel => switch (visibility) {
+        DropVisibility.private => 'PRIVATE',
+        DropVisibility.custom => 'SPECIFIC PEOPLE',
+        DropVisibility.public => 'PUBLIC',
+      };
 
   /// Total size across every attachment, or null if none are known.
   int? get totalSizeBytes {
