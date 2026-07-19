@@ -12,6 +12,7 @@ import '../widgets/drop_card.dart';
 import 'create_drop_screen.dart';
 import 'profile_screen.dart';
 import 'drop_detail_screen.dart';
+import 'user_search_screen.dart';
 
 class FeedScreen extends StatefulWidget {
   FeedScreen({super.key});
@@ -173,6 +174,25 @@ class FeedScreenState extends State<FeedScreen> with TickerProviderStateMixin {
     return true;
   }
 
+  /// Drops actually shown on the feed. Locked drops are deliberately
+  /// left out here — a feed full of blurred, unrevealed cards is a
+  /// confusing first impression, especially for a brand-new account
+  /// with nothing unlocked yet. Locked drops still exist and are still
+  /// findable — just intentionally, by searching the person who left
+  /// them and opening their profile — rather than cluttering this list.
+  List<Drop> get _visibleDrops => _drops.where((d) => d.isUnlocked).toList();
+
+  Future<void> _openUserSearch() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => UserSearchScreen(
+          currentLat: _position?.latitude,
+          currentLng: _position?.longitude,
+        ),
+      ),
+    );
+  }
+
   Future<void> _openDrop(Drop drop) async {
     if (_position == null) return;
     await Navigator.of(context).push(
@@ -206,13 +226,18 @@ class FeedScreenState extends State<FeedScreen> with TickerProviderStateMixin {
                 if (_position != null || (_offline && _drops.isNotEmpty))
                   Text(
                     _offline
-                        ? '${_drops.length} drops nearby · offline, showing saved posts'
-                        : '${_drops.length} drops nearby',
+                        ? '${_visibleDrops.length} drops nearby · offline, showing saved posts'
+                        : '${_visibleDrops.length} drops nearby',
                     style: Theme.of(context).textTheme.labelSmall,
                   ),
               ],
             ),
             actions: [
+              IconButton(
+                icon: Icon(Icons.search_rounded),
+                tooltip: 'Find a user',
+                onPressed: _openUserSearch,
+              ),
               IconButton(
                 icon: Icon(Icons.person_outline_rounded),
                 onPressed: () => Navigator.of(context).push(
@@ -317,27 +342,46 @@ class FeedScreenState extends State<FeedScreen> with TickerProviderStateMixin {
         ),
       );
     }
-    if (_drops.isEmpty) {
+    final visible = _visibleDrops;
+
+    if (visible.isEmpty) {
+      final hasLockedNearby = _drops.isNotEmpty;
       return LayoutBuilder(
         builder: (context, constraints) => SingleChildScrollView(
           physics: AlwaysScrollableScrollPhysics(),
           child: ConstrainedBox(
             constraints: BoxConstraints(minHeight: constraints.maxHeight),
             child: Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.location_on_outlined,
-                      color: RMColors.textHint, size: 48),
-                  SizedBox(height: 12),
-                  Text('No drops nearby yet.',
-                      style: TextStyle(
-                          color: RMColors.textPrimary,
-                          fontWeight: FontWeight.w600)),
-                  SizedBox(height: 4),
-                  Text('Be the first to leave something here.',
-                      style: TextStyle(color: RMColors.textSecondary)),
-                ],
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 32),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.location_on_outlined,
+                        color: RMColors.textHint, size: 48),
+                    SizedBox(height: 12),
+                    Text('No drops nearby yet.',
+                        style: TextStyle(
+                            color: RMColors.textPrimary,
+                            fontWeight: FontWeight.w600)),
+                    SizedBox(height: 4),
+                    Text(
+                      hasLockedNearby
+                          ? 'There are locked drops nearby — search for who left them to find them.'
+                          : 'Be the first to leave something here.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: RMColors.textSecondary),
+                    ),
+                    if (hasLockedNearby) ...[
+                      SizedBox(height: 16),
+                      OutlinedButton.icon(
+                        onPressed: _openUserSearch,
+                        icon: Icon(Icons.search_rounded),
+                        label: Text('Find a user'),
+                      ),
+                    ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -348,12 +392,12 @@ class FeedScreenState extends State<FeedScreen> with TickerProviderStateMixin {
     return ListView.builder(
       physics: AlwaysScrollableScrollPhysics(),
       padding: EdgeInsets.fromLTRB(16, 8, 16, 100),
-      itemCount: _drops.length,
+      itemCount: visible.length,
       itemBuilder: (context, index) => AnimatedDropCard(
-        key: ValueKey(_drops[index].id),
-        drop: _drops[index],
+        key: ValueKey(visible[index].id),
+        drop: visible[index],
         index: index,
-        onTap: () => _openDrop(_drops[index]),
+        onTap: () => _openDrop(visible[index]),
       ),
     );
   }

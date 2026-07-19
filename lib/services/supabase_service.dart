@@ -96,6 +96,26 @@ class SupabaseService {
         .toList();
   }
 
+  /// All drops made by one specific user — locked ones included, with
+  /// distance from [lat]/[lng] so they can still be navigated to. This
+  /// is how a locked drop is meant to be found now that the Explore
+  /// feed only shows already-unlocked drops: search for the person who
+  /// left it, then browse their profile.
+  Future<List<Drop>> fetchUserDrops({
+    required String userId,
+    required double lat,
+    required double lng,
+  }) async {
+    final rows = await _client.rpc('user_drops', params: {
+      'target_user_id': userId,
+      'user_lat': lat,
+      'user_lng': lng,
+    });
+    return (rows as List)
+        .map((row) => Drop.fromMap(row as Map<String, dynamic>))
+        .toList();
+  }
+
   /// Attempts to unlock a drop. The server independently verifies
   /// proximity — the client's claimed location is never trusted for
   /// the actual unlock decision.

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Matches RMColors.background's dark palette value (lib/theme/rm_theme.dart)
+         so the native launch screen and the Flutter splash screen are the
+         same color — no flash of white/black in between. -->
+    <color name="launch_background">#0A0A0F</color>
+</resources>
