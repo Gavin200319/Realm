@@ -252,6 +252,14 @@ class SupabaseService {
     return List<Map<String, dynamic>>.from(rows);
   }
 
+  /// Everyone the current user follows who also follows them back —
+  /// used to show a "Friends" list when starting a new chat, so people
+  /// don't have to type a username for someone they already talk to.
+  Future<List<Map<String, dynamic>>> fetchMutualFollows() async {
+    final rows = await _client.rpc('get_mutual_follows');
+    return List<Map<String, dynamic>>.from(rows as List);
+  }
+
   /// Returns the most recently created drop id by a user.
   /// Used after createDrop to grant allowlist access.
   Future<String?> fetchLatestDropId(String userId) async {

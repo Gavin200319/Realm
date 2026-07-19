@@ -48,7 +48,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
   }
 
   Future<void> _startNewChat() async {
-    final username = await showModalBottomSheet<String>(
+    final picked = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       backgroundColor: RMColors.surface,
       isScrollControlled: true,
@@ -57,46 +57,28 @@ class _ChatsScreenState extends State<ChatsScreen> {
       ),
       builder: (_) => _NewChatSheet(),
     );
-    if (username == null) return;
+    if (picked == null) return;
 
-    try {
-      final results = await SupabaseService.instance.searchUsers(username);
-      final match = results.firstWhere(
-        (r) => (r['username'] as String).toLowerCase() ==
-            username.toLowerCase(),
-        orElse: () => {},
-      );
-      if (match.isEmpty) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('No user found with that username.')),
-          );
-        }
-        return;
-      }
-      final me = SupabaseService.instance.currentUser?.id;
-      if (match['id'] == me) {
+    final me = SupabaseService.instance.currentUser?.id;
+    if (picked['id'] == me) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text("You can't message yourself.")),
         );
-        return;
       }
-      if (!mounted) return;
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => ChatConversationScreen(
-            otherUserId: match['id'] as String,
-            otherUsername: match['username'] as String,
-          ),
-        ),
-      );
-      _load();
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.toString())));
-      }
+      return;
     }
+
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ChatConversationScreen(
+          otherUserId: picked['id'] as String,
+          otherUsername: picked['username'] as String,
+        ),
+      ),
+    );
+    _load();
   }
 
   @override
@@ -285,10 +267,41 @@ class _NewChatSheet extends StatefulWidget {
 
 class _NewChatSheetState extends State<_NewChatSheet> {
   final _ctrl = TextEditingController();
+
+  List<Map<String, dynamic>> _friends = [];
+  bool _loadingFriends = true;
+  String? _friendsError;
+
   List<Map<String, dynamic>> _results = [];
   bool _searching = false;
 
+  bool get _isSearchMode => _ctrl.text.trim().length >= 2;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadFriends();
+  }
+
+  Future<void> _loadFriends() async {
+    setState(() { _loadingFriends = true; _friendsError = null; });
+    try {
+      final friends = await SupabaseService.instance.fetchMutualFollows();
+      if (mounted) setState(() => _friends = friends);
+    } catch (e) {
+      if (mounted) setState(() => _friendsError = e.toString());
+    } finally {
+      if (mounted) setState(() => _loadingFriends = false);
+    }
+  }
+
   Future<void> _search(String query) async {
+    // Below the 2-char threshold we just fall back to the friends list
+    // rather than firing a query that searchUsers() would reject anyway.
+    if (query.trim().length < 2) {
+      setState(() => _results = []);
+      return;
+    }
     setState(() => _searching = true);
     try {
       final results = await SupabaseService.instance.searchUsers(query);
@@ -298,10 +311,125 @@ class _NewChatSheetState extends State<_NewChatSheet> {
     }
   }
 
+  void _pick(Map<String, dynamic> user) {
+    Navigator.of(context).pop(user);
+  }
+
   @override
   void dispose() {
     _ctrl.dispose();
     super.dispose();
+  }
+
+  Widget _userTile(Map<String, dynamic> r) {
+    return ListTile(
+      leading: CircleAvatar(
+        backgroundColor: RMColors.primaryDim,
+        backgroundImage: r['avatar_url'] != null
+            ? CachedNetworkImageProvider(r['avatar_url'] as String)
+            : null,
+        child: r['avatar_url'] == null
+            ? Icon(Icons.person_rounded, color: RMColors.primary)
+            : null,
+      ),
+      title: Text(r['username'] as String? ?? ''),
+      subtitle: (r['display_name'] as String?)?.isNotEmpty == true
+          ? Text(r['display_name'] as String)
+          : null,
+      onTap: () => _pick(r),
+    );
+  }
+
+  Widget _sectionLabel(String text) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(4, 4, 4, 4),
+      child: Text(
+        text.toUpperCase(),
+        style: TextStyle(
+          color: RMColors.textHint,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.6,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildList() {
+    if (_isSearchMode) {
+      if (_searching && _results.isEmpty) {
+        return Padding(
+          padding: EdgeInsets.symmetric(vertical: 24),
+          child: Center(
+            child: SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          ),
+        );
+      }
+      if (_results.isEmpty) {
+        return Padding(
+          padding: EdgeInsets.symmetric(vertical: 24),
+          child: Center(
+            child: Text('No users found.',
+                style: TextStyle(color: RMColors.textSecondary)),
+          ),
+        );
+      }
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _sectionLabel('Search results'),
+          ..._results.map(_userTile),
+        ],
+      );
+    }
+
+    // Default view: friends (people you follow who follow you back).
+    if (_loadingFriends) {
+      return Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(
+          child: SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+    if (_friendsError != null) {
+      return Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(
+          child: Text('Couldn\'t load friends.',
+              style: TextStyle(color: RMColors.textSecondary)),
+        ),
+      );
+    }
+    if (_friends.isEmpty) {
+      return Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(
+          child: Text(
+            'No friends yet — follow each other to see\nthem here, or search a username above.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: RMColors.textSecondary),
+          ),
+        ),
+      );
+    }
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionLabel('Friends'),
+        ..._friends.map(_userTile),
+      ],
+    );
   }
 
   @override
@@ -336,36 +464,16 @@ class _NewChatSheetState extends State<_NewChatSheet> {
                     )
                   : null,
             ),
-            onChanged: _search,
-            onSubmitted: (v) => Navigator.of(context).pop(v),
+            onChanged: (v) {
+              setState(() {}); // toggle friends vs. search sections
+              _search(v);
+            },
           ),
           SizedBox(height: 8),
-          if (_results.isNotEmpty)
-            ConstrainedBox(
-              constraints: BoxConstraints(maxHeight: 260),
-              child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: _results.length,
-                itemBuilder: (context, i) {
-                  final r = _results[i];
-                  return ListTile(
-                    leading: CircleAvatar(
-                      backgroundColor: RMColors.primaryDim,
-                      backgroundImage: r['avatar_url'] != null
-                          ? CachedNetworkImageProvider(r['avatar_url'] as String)
-                          : null,
-                      child: r['avatar_url'] == null
-                          ? Icon(Icons.person_rounded, color: RMColors.primary)
-                          : null,
-                    ),
-                    title: Text(r['username'] as String? ?? ''),
-                    subtitle: Text(r['display_name'] as String? ?? ''),
-                    onTap: () =>
-                        Navigator.of(context).pop(r['username'] as String),
-                  );
-                },
-              ),
-            ),
+          ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: 320),
+            child: SingleChildScrollView(child: _buildList()),
+          ),
         ],
       ),
     );
