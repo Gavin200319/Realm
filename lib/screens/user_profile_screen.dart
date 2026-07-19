@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../models/drop.dart';
-import '../models/profile_stats.dart';
+import '../models/public_profile.dart';
 import '../services/location_service.dart';
 import '../services/supabase_service.dart';
 import '../theme/rm_theme.dart';
@@ -9,10 +9,12 @@ import '../widgets/drop_card.dart';
 import 'drop_detail_screen.dart';
 
 /// Read-only view of someone else's profile, reached by searching their
-/// username from the Explore feed. Lists every drop they've made —
-/// locked ones included, each showing its distance — since the Explore
-/// feed itself only shows already-unlocked drops. This is the intended
-/// way to find a specific locked drop: look up who left it.
+/// username from the Explore feed. Shows only what that person has
+/// chosen to make public — see [PublicProfile] — plus a follow button
+/// and their full drop list (locked drops included, each showing its
+/// distance) since the Explore feed itself only shows already-unlocked
+/// drops. This is the intended way to find a specific locked drop: look
+/// up who left it.
 class UserProfileScreen extends StatefulWidget {
   final String userId;
   final String username;
@@ -34,11 +36,12 @@ class UserProfileScreen extends StatefulWidget {
 }
 
 class _UserProfileScreenState extends State<UserProfileScreen> {
-  ProfileStats? _stats;
+  PublicProfile? _profile;
   List<Drop> _drops = [];
   double? _lat;
   double? _lng;
   bool _loading = true;
+  bool _followBusy = false;
   String? _error;
 
   @override
@@ -58,7 +61,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         _lng = position.longitude;
       }
       final results = await Future.wait([
-        SupabaseService.instance.fetchProfileStats(widget.userId),
+        SupabaseService.instance.fetchPublicProfile(widget.userId),
         SupabaseService.instance.fetchUserDrops(
           userId: widget.userId,
           lat: _lat!,
@@ -67,13 +70,45 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       ]);
       if (!mounted) return;
       setState(() {
-        _stats = results[0] as ProfileStats?;
+        _profile = results[0] as PublicProfile?;
         _drops = results[1] as List<Drop>;
       });
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
     } finally {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _toggleFollow() async {
+    final profile = _profile;
+    if (profile == null || _followBusy) return;
+    setState(() => _followBusy = true);
+    try {
+      final nowFollowing = await SupabaseService.instance.toggleFollow(profile.userId);
+      if (!mounted) return;
+      setState(() {
+        _profile = PublicProfile(
+          userId: profile.userId,
+          username: profile.username,
+          displayName: profile.displayName,
+          homeCity: profile.homeCity,
+          avatarUrl: profile.avatarUrl,
+          dropsCreated: profile.dropsCreated,
+          dropsUnlocked: profile.dropsUnlocked,
+          followerCount: profile.followerCount + (nowFollowing ? 1 : -1),
+          followingCount: profile.followingCount,
+          isFollowing: nowFollowing,
+          isSelf: profile.isSelf,
+        );
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.toString())));
+      }
+    } finally {
+      if (mounted) setState(() => _followBusy = false);
     }
   }
 
@@ -138,19 +173,22 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       );
     }
 
+    final profile = _profile;
+
     return ListView(
       physics: AlwaysScrollableScrollPhysics(),
       padding: EdgeInsets.fromLTRB(16, 16, 16, 100),
       children: [
         Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             CircleAvatar(
               radius: 32,
               backgroundColor: RMColors.primaryDim,
-              backgroundImage: _stats?.avatarUrl != null
-                  ? CachedNetworkImageProvider(_stats!.avatarUrl!)
+              backgroundImage: profile?.avatarUrl != null
+                  ? CachedNetworkImageProvider(profile!.avatarUrl!)
                   : null,
-              child: _stats?.avatarUrl == null
+              child: profile?.avatarUrl == null
                   ? Icon(Icons.person_rounded, color: RMColors.primary, size: 30)
                   : null,
             ),
@@ -159,21 +197,63 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('@${widget.username}',
-                      style: TextStyle(
-                          color: RMColors.textPrimary,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 18)),
-                  SizedBox(height: 6),
+                  // ── Username + follow button, right next to each other ──
                   Row(
                     children: [
+                      Flexible(
+                        child: Text('@${widget.username}',
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                color: RMColors.textPrimary,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 18)),
+                      ),
+                      if (profile != null && !profile.isSelf) ...[
+                        SizedBox(width: 10),
+                        _FollowButton(
+                          isFollowing: profile.isFollowing,
+                          busy: _followBusy,
+                          onTap: _toggleFollow,
+                        ),
+                      ],
+                    ],
+                  ),
+                  // Display name — omitted entirely if the owner has it
+                  // set to private (and it's not their own profile).
+                  if (profile?.displayName != null) ...[
+                    SizedBox(height: 2),
+                    Text(profile!.displayName!,
+                        style: TextStyle(color: RMColors.textSecondary, fontSize: 13)),
+                  ],
+                  // Home city — same rule.
+                  if (profile?.homeCity != null) ...[
+                    SizedBox(height: 2),
+                    Row(
+                      children: [
+                        Icon(Icons.place_rounded, size: 13, color: RMColors.textHint),
+                        SizedBox(width: 3),
+                        Text(profile!.homeCity!,
+                            style: TextStyle(color: RMColors.textHint, fontSize: 12)),
+                      ],
+                    ),
+                  ],
+                  SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
                       _StatChip(
-                          label: 'drops',
-                          value: _stats?.dropsCreated ?? _drops.length),
-                      SizedBox(width: 8),
+                          label: 'followers',
+                          value: profile?.followerCount ?? 0),
                       _StatChip(
-                          label: 'unlocked',
-                          value: _stats?.dropsUnlocked ?? 0),
+                          label: 'following',
+                          value: profile?.followingCount ?? 0),
+                      // Drop stats are only shown if the owner allows it
+                      // (or this is their own profile) — see get_public_profile.
+                      if (profile?.dropsCreated != null)
+                        _StatChip(label: 'drops', value: profile!.dropsCreated!),
+                      if (profile?.dropsUnlocked != null)
+                        _StatChip(label: 'unlocked', value: profile!.dropsUnlocked!),
                     ],
                   ),
                 ],
@@ -202,6 +282,52 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                 child: DropCard(drop: drop, onTap: () => _openDrop(drop)),
               )),
       ],
+    );
+  }
+}
+
+class _FollowButton extends StatelessWidget {
+  final bool isFollowing;
+  final bool busy;
+  final VoidCallback onTap;
+
+  const _FollowButton({
+    required this.isFollowing,
+    required this.busy,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 30,
+      child: OutlinedButton(
+        onPressed: busy ? null : onTap,
+        style: OutlinedButton.styleFrom(
+          padding: EdgeInsets.symmetric(horizontal: 14),
+          backgroundColor: isFollowing ? Colors.transparent : RMColors.primary,
+          side: BorderSide(
+              color: isFollowing ? RMColors.border : RMColors.primary),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+        child: busy
+            ? SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: isFollowing ? RMColors.textSecondary : Colors.white,
+                ),
+              )
+            : Text(
+                isFollowing ? 'Following' : 'Follow',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: isFollowing ? RMColors.textSecondary : Colors.white,
+                ),
+              ),
+      ),
     );
   }
 }

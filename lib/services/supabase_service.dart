@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/drop.dart';
 import '../models/profile_stats.dart';
+import '../models/public_profile.dart';
 import '../models/flick.dart';
 import 'local_cache_service.dart';
 
@@ -237,13 +238,16 @@ class SupabaseService {
   }
 
   /// Search profiles by username prefix — used for the access allowlist
-  /// picker when creating a private drop.
+  /// picker when creating a private drop, starting a chat, and the
+  /// Explore feed's user search. Excludes anyone who's turned off
+  /// "Allow discovery" in their privacy settings.
   Future<List<Map<String, dynamic>>> searchUsers(String query) async {
     if (query.length < 2) return [];
     final rows = await _client
         .from('profiles')
         .select('id, username, display_name, avatar_url')
         .ilike('username', '$query%')
+        .eq('allow_discovery', true)
         .limit(10);
     return List<Map<String, dynamic>>.from(rows);
   }
@@ -317,6 +321,57 @@ class SupabaseService {
         .maybeSingle();
     if (row == null) return null;
     return ProfileStats.fromMap(row);
+  }
+
+  /// The privacy-filtered view of a profile shown to visitors: any
+  /// field the owner has marked private is already null by the time it
+  /// gets here (enforced server-side in `get_public_profile`), plus
+  /// follow counts and whether the current user follows them.
+  Future<PublicProfile?> fetchPublicProfile(String userId) async {
+    final rows = await _client.rpc('get_public_profile', params: {
+      'target_user_id': userId,
+    });
+    final list = rows as List;
+    if (list.isEmpty) return null;
+    return PublicProfile.fromMap(list.first as Map<String, dynamic>);
+  }
+
+  /// Follows/unfollows [userId] as the current user. Returns the new
+  /// state — true if now following, false if now unfollowed.
+  Future<bool> toggleFollow(String userId) async {
+    final result = await _client.rpc('toggle_follow', params: {
+      'target_user_id': userId,
+    });
+    return result as bool;
+  }
+
+  /// The current user's own privacy flags, for the Privacy settings sheet.
+  Future<Map<String, dynamic>?> fetchPrivacySettings(String userId) async {
+    final row = await _client
+        .from('profiles')
+        .select('show_home_city, show_display_name, show_stats, allow_discovery')
+        .eq('id', userId)
+        .maybeSingle();
+    return row;
+  }
+
+  /// Persists one or more privacy flags for the current user. Each
+  /// controls a specific detail on their public-facing profile — see
+  /// `get_public_profile`.
+  Future<void> updatePrivacySettings({
+    required String userId,
+    bool? showHomeCity,
+    bool? showDisplayName,
+    bool? showStats,
+    bool? allowDiscovery,
+  }) async {
+    final updates = <String, dynamic>{};
+    if (showHomeCity != null) updates['show_home_city'] = showHomeCity;
+    if (showDisplayName != null) updates['show_display_name'] = showDisplayName;
+    if (showStats != null) updates['show_stats'] = showStats;
+    if (allowDiscovery != null) updates['allow_discovery'] = allowDiscovery;
+    if (updates.isEmpty) return;
+    await _client.from('profiles').update(updates).eq('id', userId);
   }
 
   Future<void> updateProfile({

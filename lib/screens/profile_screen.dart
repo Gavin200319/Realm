@@ -613,6 +613,56 @@ class _PrivacySettingsSheet extends StatefulWidget {
 class _PrivacySettingsSheetState extends State<_PrivacySettingsSheet> {
   bool _showOnMap = true;
   bool _allowDiscovery = true;
+  bool _showHomeCity = true;
+  bool _showDisplayName = true;
+  bool _showStats = true;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final user = SupabaseService.instance.currentUser;
+    if (user == null) return;
+    final settings = await SupabaseService.instance.fetchPrivacySettings(user.id);
+    if (!mounted) return;
+    setState(() {
+      if (settings != null) {
+        _allowDiscovery = settings['allow_discovery'] as bool? ?? true;
+        _showHomeCity = settings['show_home_city'] as bool? ?? true;
+        _showDisplayName = settings['show_display_name'] as bool? ?? true;
+        _showStats = settings['show_stats'] as bool? ?? true;
+      }
+      _loading = false;
+    });
+  }
+
+  Future<void> _save({
+    bool? allowDiscovery,
+    bool? showHomeCity,
+    bool? showDisplayName,
+    bool? showStats,
+  }) async {
+    final user = SupabaseService.instance.currentUser;
+    if (user == null) return;
+    try {
+      await SupabaseService.instance.updatePrivacySettings(
+        userId: user.id,
+        allowDiscovery: allowDiscovery,
+        showHomeCity: showHomeCity,
+        showDisplayName: showDisplayName,
+        showStats: showStats,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not save: $e')));
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -628,19 +678,63 @@ class _PrivacySettingsSheetState extends State<_PrivacySettingsSheet> {
                   fontWeight: FontWeight.w700,
                   fontSize: 18)),
           SizedBox(height: 16),
-          _SwitchRow(
-            label: 'Show in feed',
-            sub: 'Allow others to see your public drops nearby',
-            value: _showOnMap,
-            onChanged: (v) => setState(() => _showOnMap = v),
-          ),
-          _SwitchRow(
-            label: 'Allow discovery',
-            sub: 'Let other users find you by username search',
-            value: _allowDiscovery,
-            onChanged: (v) => setState(() => _allowDiscovery = v),
-          ),
-          SizedBox(height: 8),
+          if (_loading)
+            Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Center(
+                  child: CircularProgressIndicator(color: RMColors.primary)),
+            )
+          else ...[
+            _SwitchRow(
+              label: 'Show in feed',
+              sub: 'Allow others to see your public drops nearby',
+              value: _showOnMap,
+              onChanged: (v) => setState(() => _showOnMap = v),
+            ),
+            _SwitchRow(
+              label: 'Allow discovery',
+              sub: 'Let other users find you by username search',
+              value: _allowDiscovery,
+              onChanged: (v) {
+                setState(() => _allowDiscovery = v);
+                _save(allowDiscovery: v);
+              },
+            ),
+            Divider(color: RMColors.border, height: 24),
+            Text('On your public profile',
+                style: TextStyle(
+                    color: RMColors.textSecondary,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12)),
+            SizedBox(height: 12),
+            _SwitchRow(
+              label: 'Display name',
+              sub: 'Show your display name to visitors',
+              value: _showDisplayName,
+              onChanged: (v) {
+                setState(() => _showDisplayName = v);
+                _save(showDisplayName: v);
+              },
+            ),
+            _SwitchRow(
+              label: 'Home city',
+              sub: 'Show your home city to visitors',
+              value: _showHomeCity,
+              onChanged: (v) {
+                setState(() => _showHomeCity = v);
+                _save(showHomeCity: v);
+              },
+            ),
+            _SwitchRow(
+              label: 'Drop stats',
+              sub: 'Show your drops-made / drops-unlocked counts',
+              value: _showStats,
+              onChanged: (v) {
+                setState(() => _showStats = v);
+                _save(showStats: v);
+              },
+            ),
+          ],
         ],
       ),
     );
