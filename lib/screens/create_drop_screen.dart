@@ -1,8 +1,12 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
+import 'package:video_compress/video_compress.dart';
 import '../models/drop.dart';
+import '../services/data_saver_service.dart';
 import '../services/supabase_service.dart';
 import '../services/onboarding_service.dart';
 import '../services/drop_events.dart';
@@ -10,6 +14,47 @@ import '../theme/rm_theme.dart';
 import '../widgets/tutorial_overlay.dart';
 import '../widgets/location_autocomplete_field.dart';
 import '../widgets/upload_progress_toast.dart';
+
+/// Argument bundle for [_resizeAndEncodeJpeg] — `compute` requires a
+/// single argument, so the resize/quality settings travel with the bytes.
+class _PhotoCompressArgs {
+  final Uint8List bytes;
+  final int maxDimension;
+  final int quality;
+  _PhotoCompressArgs({
+    required this.bytes,
+    required this.maxDimension,
+    required this.quality,
+  });
+}
+
+/// Decodes, downsamples (if needed), and re-encodes a photo as JPEG.
+/// Runs on a background isolate via `compute` — must be a top-level
+/// (or static) function for that. Returns null if the bytes can't be
+/// decoded as an image at all.
+Uint8List? _resizeAndEncodeJpeg(_PhotoCompressArgs args) {
+  final decoded = img.decodeImage(args.bytes);
+  if (decoded == null) return null;
+
+  img.Image toEncode = decoded;
+  final longestEdge = decoded.width > decoded.height ? decoded.width : decoded.height;
+  if (longestEdge > args.maxDimension) {
+    toEncode = decoded.width >= decoded.height
+        ? img.copyResize(decoded, width: args.maxDimension)
+        : img.copyResize(decoded, height: args.maxDimension);
+  }
+
+  return Uint8List.fromList(img.encodeJpg(toEncode, quality: args.quality));
+}
+
+class _VideoCompressResult {
+  final Uint8List bytes;
+  /// New extension to use, or null to keep the original file's extension
+  /// (compression was skipped/failed and the source bytes are unchanged).
+  final String? extension;
+  final Uint8List? thumbBytes;
+  _VideoCompressResult({required this.bytes, this.extension, this.thumbBytes});
+}
 
 /// One file the user has picked to attach to this drop, plus everything
 /// needed to preview and later upload it.
@@ -92,6 +137,78 @@ class _CreateDropScreenState extends State<CreateDropScreen>
     } catch (_) {
       return null;
     }
+  }
+
+  /// Resizes + re-encodes a photo before upload. Runs on a background
+  /// isolate via `compute` since decoding/encoding a full-resolution
+  /// photo is heavy enough to jank the UI if done on the main isolate.
+  /// Falls back to the original bytes untouched if decoding fails
+  /// (unsupported format, corrupt file, etc.) — better to upload the
+  /// original than to fail the whole drop over a thumbnail nicety.
+  Future<Uint8List> _compressPhoto(Uint8List bytes) async {
+    try {
+      final result = await compute(_resizeAndEncodeJpeg, _PhotoCompressArgs(
+        bytes: bytes,
+        maxDimension: DataSaverService.instance.photoMaxDimension,
+        quality: DataSaverService.instance.photoQuality,
+      ));
+      // Only use the compressed version if it's actually smaller —
+      // a tiny/already-compressed source image can re-encode larger.
+      return result != null && result.length < bytes.length ? result : bytes;
+    } catch (_) {
+      return bytes;
+    }
+  }
+
+  /// Compresses a video before upload and grabs a static first-frame
+  /// thumbnail alongside it (used by the feed instead of ever spinning
+  /// up a real video player per card — see media_thumbnail.dart).
+  /// Returns the (possibly unchanged) video bytes/extension plus the
+  /// thumbnail bytes, or nulls for the thumbnail if generation fails.
+  Future<_VideoCompressResult> _compressVideo(File file) async {
+    final dataSaver = DataSaverService.instance.enabled;
+    File? compressed;
+    Uint8List? thumbBytes;
+    try {
+      final info = await VideoCompress.compressVideo(
+        file.path,
+        quality: dataSaver ? VideoQuality.LowQuality : VideoQuality.MediumQuality,
+        deleteOrigin: false,
+      );
+      compressed = info?.file;
+    } catch (_) {
+      // Compression can fail on some devices/formats — just fall back
+      // to uploading the original file untouched.
+      compressed = null;
+    }
+
+    try {
+      final thumbFile = await VideoCompress.getFileThumbnail(
+        file.path,
+        quality: 50,
+      );
+      thumbBytes = await thumbFile.readAsBytes();
+    } catch (_) {
+      thumbBytes = null;
+    }
+
+    if (compressed != null) {
+      final compressedBytes = await compressed.readAsBytes();
+      final originalSize = await _sizeOf(file) ?? compressedBytes.length + 1;
+      if (compressedBytes.length < originalSize) {
+        return _VideoCompressResult(
+          bytes: compressedBytes,
+          extension: 'mp4',
+          thumbBytes: thumbBytes,
+        );
+      }
+    }
+
+    return _VideoCompressResult(
+      bytes: await file.readAsBytes(),
+      extension: null, // caller keeps the original extension
+      thumbBytes: thumbBytes,
+    );
   }
 
   Future<void> _addPicked(File file, String mediaType, String name) async {
@@ -215,11 +332,45 @@ class _CreateDropScreenState extends State<CreateDropScreen>
 
         for (var i = 0; i < _mediaList.length; i++) {
           final item = _mediaList[i];
-          final bytes = await item.file.readAsBytes();
+          Uint8List bytes;
+          String extension = item.extension;
+          String? thumbUrl;
+
+          if (item.mediaType == 'photo') {
+            toast?.update(
+              fileName: 'Compressing ${item.fileName}…',
+              fileIndex: i + 1,
+              fileCount: _mediaList.length,
+              progress: 0,
+            );
+            final original = await item.file.readAsBytes();
+            bytes = await _compressPhoto(original);
+            extension = 'jpg';
+          } else if (item.mediaType == 'video') {
+            toast?.update(
+              fileName: 'Compressing ${item.fileName}…',
+              fileIndex: i + 1,
+              fileCount: _mediaList.length,
+              progress: 0,
+            );
+            final result = await _compressVideo(item.file);
+            bytes = result.bytes;
+            if (result.extension != null) extension = result.extension!;
+            if (result.thumbBytes != null) {
+              thumbUrl = await SupabaseService.instance.uploadDropMedia(
+                bytes: result.thumbBytes!,
+                mediaType: 'photo',
+                extension: 'jpg',
+              );
+            }
+          } else {
+            bytes = await item.file.readAsBytes();
+          }
+
           final url = await SupabaseService.instance.uploadDropMedia(
             bytes: bytes,
             mediaType: item.mediaType,
-            extension: item.extension,
+            extension: extension,
             onProgress: (p) => toast?.update(
               fileName: item.fileName,
               fileIndex: i + 1,
@@ -230,8 +381,9 @@ class _CreateDropScreenState extends State<CreateDropScreen>
           mediaItems.add({
             'url': url,
             'type': item.mediaType,
-            'size_bytes': item.sizeBytes ?? bytes.length,
+            'size_bytes': bytes.length,
             'name': item.fileName,
+            if (thumbUrl != null) 'thumb_url': thumbUrl,
           });
         }
 

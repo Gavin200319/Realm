@@ -153,7 +153,14 @@ class _ReactionsScreenState extends State<ReactionsScreen> {
                               children: [
                                 CircleAvatar(
                                   radius: 16,
-                                  child: Icon(Icons.person, size: 16),
+                                  backgroundImage:
+                                      c['profiles']?['avatar_url'] != null
+                                          ? NetworkImage(
+                                              c['profiles']['avatar_url'] as String)
+                                          : null,
+                                  child: c['profiles']?['avatar_url'] == null
+                                      ? Icon(Icons.person, size: 16)
+                                      : null,
                                 ),
                                 SizedBox(width: 10),
                                 Expanded(

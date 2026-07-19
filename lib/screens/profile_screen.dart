@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/profile_stats.dart';
+import '../services/data_saver_service.dart';
 import '../services/supabase_service.dart';
 import '../theme/rm_theme.dart';
 import '../widgets/location_autocomplete_field.dart';
@@ -15,6 +17,7 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   ProfileStats? _stats;
   bool _loading = true;
+  bool _uploadingAvatar = false;
 
   @override
   void initState() {
@@ -27,6 +30,63 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (user == null) return;
     final stats = await SupabaseService.instance.fetchProfileStats(user.id);
     setState(() { _stats = stats; _loading = false; });
+  }
+
+  Future<void> _changeAvatar() async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: RMColors.surface,
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(height: 8),
+            ListTile(
+              leading: Icon(Icons.photo_camera_rounded, color: RMColors.textPrimary),
+              title: Text('Take photo', style: TextStyle(color: RMColors.textPrimary)),
+              onTap: () => Navigator.of(ctx).pop(ImageSource.camera),
+            ),
+            ListTile(
+              leading: Icon(Icons.photo_library_rounded, color: RMColors.textPrimary),
+              title: Text('Choose from gallery', style: TextStyle(color: RMColors.textPrimary)),
+              onTap: () => Navigator.of(ctx).pop(ImageSource.gallery),
+            ),
+            SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (source == null) return;
+
+    final picked = await ImagePicker().pickImage(
+      source: source,
+      maxWidth: 800,
+      maxHeight: 800,
+      imageQuality: 85,
+    );
+    if (picked == null) return;
+
+    setState(() => _uploadingAvatar = true);
+    try {
+      final bytes = await picked.readAsBytes();
+      final ext = picked.name.contains('.')
+          ? picked.name.split('.').last.toLowerCase()
+          : 'jpg';
+      await SupabaseService.instance.uploadAvatar(
+        bytes: bytes,
+        extension: ext == 'jpg' || ext == 'jpeg' || ext == 'png' ? ext : 'jpg',
+      );
+      await _load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not update photo: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _uploadingAvatar = false);
+    }
   }
 
   List<_Badge> _getBadges(ProfileStats stats) {
@@ -72,32 +132,80 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   Center(
                     child: Column(
                       children: [
-                        Container(
-                          width: 80,
-                          height: 80,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            gradient: LinearGradient(
-                              colors: [RMColors.primary, RMColors.primaryDim],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: RMColors.primary.withOpacity(0.3),
-                                blurRadius: 16,
-                                spreadRadius: 2,
+                        GestureDetector(
+                          onTap: _uploadingAvatar ? null : _changeAvatar,
+                          child: Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              Container(
+                                width: 80,
+                                height: 80,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  gradient: LinearGradient(
+                                    colors: [RMColors.primary, RMColors.primaryDim],
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                  ),
+                                  image: _stats?.avatarUrl != null
+                                      ? DecorationImage(
+                                          image: NetworkImage(_stats!.avatarUrl!),
+                                          fit: BoxFit.cover,
+                                        )
+                                      : null,
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: RMColors.primary.withOpacity(0.3),
+                                      blurRadius: 16,
+                                      spreadRadius: 2,
+                                    ),
+                                  ],
+                                ),
+                                child: _stats?.avatarUrl != null
+                                    ? null
+                                    : Center(
+                                        child: Text(
+                                          (_stats?.username ?? '?')[0].toUpperCase(),
+                                          style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 32,
+                                              fontWeight: FontWeight.w800),
+                                        ),
+                                      ),
+                              ),
+                              if (_uploadingAvatar)
+                                Positioned.fill(
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: Colors.black.withOpacity(0.45),
+                                    ),
+                                    child: Center(
+                                      child: SizedBox(
+                                        width: 22,
+                                        height: 22,
+                                        child: CircularProgressIndicator(
+                                            strokeWidth: 2, color: Colors.white),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              Positioned(
+                                right: -2,
+                                bottom: -2,
+                                child: Container(
+                                  padding: EdgeInsets.all(5),
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: RMColors.surface,
+                                    border: Border.all(
+                                        color: RMColors.background, width: 2),
+                                  ),
+                                  child: Icon(Icons.photo_camera_rounded,
+                                      size: 14, color: RMColors.primary),
+                                ),
                               ),
                             ],
-                          ),
-                          child: Center(
-                            child: Text(
-                              (_stats?.username ?? '?')[0].toUpperCase(),
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 32,
-                                  fontWeight: FontWeight.w800),
-                            ),
                           ),
                         ),
                         SizedBox(height: 12),
@@ -189,6 +297,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           fontSize: 15)),
                   SizedBox(height: 12),
                   _ThemeSettingsTile(),
+                  _DataSaverSettingsTile(),
                   _SettingsTile(
                     icon: Icons.person_outline_rounded,
                     label: 'Edit profile',
@@ -668,6 +777,60 @@ class _SettingsTile extends StatelessWidget {
 }
 
 // ── Appearance (light/dark mode) ────────────────────────────────────────────
+
+class _DataSaverSettingsTile extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: DataSaverService.instance,
+      builder: (context, _) {
+        final enabled = DataSaverService.instance.enabled;
+        return Container(
+          margin: EdgeInsets.only(bottom: 8),
+          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: RMColors.surface,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: RMColors.border),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                enabled ? Icons.data_saver_on_rounded : Icons.data_saver_off_rounded,
+                color: RMColors.textPrimary,
+                size: 20,
+              ),
+              SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('Data saver',
+                        style: TextStyle(
+                            color: RMColors.textPrimary,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500)),
+                    Text(
+                      'Compress photos and videos more before uploading',
+                      style: TextStyle(
+                          color: RMColors.textSecondary, fontSize: 11),
+                    ),
+                  ],
+                ),
+              ),
+              Switch(
+                value: enabled,
+                onChanged: (v) => DataSaverService.instance.setEnabled(v),
+                activeColor: RMColors.primary,
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
 
 class _ThemeSettingsTile extends StatelessWidget {
   String _label(ThemeMode mode) {

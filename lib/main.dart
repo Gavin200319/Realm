@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'screens/auth_gate.dart';
+import 'services/data_saver_service.dart';
 import 'theme/rm_theme.dart';
 
 Future<void> main() async {
@@ -10,6 +11,7 @@ Future<void> main() async {
   await dotenv.load(fileName: '.env');
 
   await ThemeController.instance.init();
+  await DataSaverService.instance.init();
 
   await Supabase.initialize(
     url: dotenv.env['SUPABASE_URL']!,

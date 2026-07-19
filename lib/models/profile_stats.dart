@@ -1,12 +1,14 @@
 class ProfileStats {
   final String userId;
   final String username;
+  final String? avatarUrl;
   final int dropsCreated;
   final int dropsUnlocked;
 
   ProfileStats({
     required this.userId,
     required this.username,
+    this.avatarUrl,
     required this.dropsCreated,
     required this.dropsUnlocked,
   });
@@ -15,6 +17,7 @@ class ProfileStats {
     return ProfileStats(
       userId: map['user_id'] as String,
       username: map['username'] as String,
+      avatarUrl: map['avatar_url'] as String?,
       dropsCreated: (map['drops_created'] as num).toInt(),
       dropsUnlocked: (map['drops_unlocked'] as num).toInt(),
     );

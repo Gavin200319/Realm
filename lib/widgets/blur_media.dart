@@ -74,6 +74,11 @@ class BlurUpImage extends StatelessWidget {
   final double? height;
   final BoxFit fit;
   final BorderRadius borderRadius;
+  /// Decodes the image at this pixel width instead of its native
+  /// resolution — cheap way to cut memory/CPU cost for thumbnails that
+  /// never render anywhere near full size (e.g. feed cards). Leave
+  /// null for full-resolution decoding (detail screens, galleries).
+  final int? cacheWidth;
 
   BlurUpImage({
     super.key,
@@ -81,6 +86,7 @@ class BlurUpImage extends StatelessWidget {
     this.height,
     this.fit = BoxFit.cover,
     this.borderRadius = BorderRadius.all(Radius.circular(14)),
+    this.cacheWidth,
   });
 
   @override
@@ -93,6 +99,7 @@ class BlurUpImage extends StatelessWidget {
         child: Image.network(
           url,
           fit: fit,
+          cacheWidth: cacheWidth,
           loadingBuilder: (context, child, progress) {
             if (progress == null) {
               // Loaded — crossfade in.

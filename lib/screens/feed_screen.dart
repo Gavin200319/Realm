@@ -29,6 +29,8 @@ class _FeedScreenState extends State<FeedScreen> with TickerProviderStateMixin {
   StreamSubscription<geo.Position>? _positionSub;
   late AnimationController _fabCtrl;
   late Animation<double> _fabScale;
+  DateTime? _lastFetchAt;
+  bool _fetchInFlight = false;
 
   @override
   void initState() {
@@ -59,11 +61,16 @@ class _FeedScreenState extends State<FeedScreen> with TickerProviderStateMixin {
     try {
       final position = await LocationService.instance.getCurrentPosition();
       setState(() => _position = position);
-      await _fetchDrops(position);
+      await _fetchDrops(position, force: true);
       _fabCtrl.forward();
 
       _positionSub = LocationService.instance.watchPosition().listen((pos) {
         setState(() => _position = pos);
+        // Walking updates the compass/distance labels via _position
+        // above regardless; the (comparatively expensive) drops
+        // re-fetch + list rebuild is throttled separately in
+        // _fetchDrops so a stream of GPS ticks while the user is
+        // scrolling doesn't stutter the feed.
         _fetchDrops(pos);
       });
     } catch (e) {
@@ -73,14 +80,51 @@ class _FeedScreenState extends State<FeedScreen> with TickerProviderStateMixin {
     }
   }
 
-  Future<void> _fetchDrops(geo.Position position) async {
+  /// Re-fetches nearby drops, but skips the round trip (and, more
+  /// importantly, the list rebuild it triggers) if we just fetched a
+  /// few seconds ago, and skips the `setState` entirely if the result
+  /// is unchanged from what's already on screen. `watchPosition` can
+  /// tick every ~3s while walking; without this, every single tick was
+  /// tearing down and rebuilding the whole visible list — including
+  /// mid-scroll — which is what made the feed hang while scrolling.
+  Future<void> _fetchDrops(geo.Position position, {bool force = false}) async {
+    if (_fetchInFlight) return;
+    final now = DateTime.now();
+    if (!force &&
+        _lastFetchAt != null &&
+        now.difference(_lastFetchAt!) < Duration(seconds: 8)) {
+      return;
+    }
+    _fetchInFlight = true;
     try {
       final drops = await SupabaseService.instance.fetchNearbyDrops(
         lat: position.latitude,
         lng: position.longitude,
       );
-      if (mounted) setState(() => _drops = drops);
-    } catch (_) {}
+      _lastFetchAt = DateTime.now();
+      if (mounted && !_sameDrops(_drops, drops)) {
+        setState(() => _drops = drops);
+      }
+    } catch (_) {
+    } finally {
+      _fetchInFlight = false;
+    }
+  }
+
+  /// Cheap equality check (id + lock state + rounded distance) — good
+  /// enough to tell "nothing worth redrawing changed" apart from a
+  /// real update, without deep-comparing every field.
+  bool _sameDrops(List<Drop> a, List<Drop> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      final x = a[i], y = b[i];
+      if (x.id != y.id ||
+          x.isUnlocked != y.isUnlocked ||
+          (x.distanceM / 5).round() != (y.distanceM / 5).round()) {
+        return false;
+      }
+    }
+    return true;
   }
 
   Future<void> _openDrop(Drop drop) async {
@@ -98,7 +142,7 @@ class _FeedScreenState extends State<FeedScreen> with TickerProviderStateMixin {
         transitionDuration: Duration(milliseconds: 300),
       ),
     );
-    if (_position != null) await _fetchDrops(_position!);
+    if (_position != null) await _fetchDrops(_position!, force: true);
   }
 
   @override
@@ -258,6 +302,7 @@ class _FeedScreenState extends State<FeedScreen> with TickerProviderStateMixin {
       padding: EdgeInsets.fromLTRB(16, 8, 16, 100),
       itemCount: _drops.length,
       itemBuilder: (context, index) => _AnimatedDropCard(
+        key: ValueKey(_drops[index].id),
         drop: _drops[index],
         index: index,
         onTap: () => _openDrop(_drops[index]),
@@ -272,6 +317,7 @@ class _AnimatedDropCard extends StatefulWidget {
   final VoidCallback onTap;
 
   _AnimatedDropCard({
+    super.key,
     required this.drop,
     required this.index,
     required this.onTap,

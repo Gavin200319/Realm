@@ -209,7 +209,7 @@ class SupabaseService {
     if (query.length < 2) return [];
     final rows = await _client
         .from('profiles')
-        .select('id, username, display_name')
+        .select('id, username, display_name, avatar_url')
         .ilike('username', '$query%')
         .limit(10);
     return List<Map<String, dynamic>>.from(rows);
@@ -237,7 +237,7 @@ class SupabaseService {
   }) async {
     final rows = await _client
         .from('drop_interactions')
-        .select('*, profiles(username)')
+        .select('*, profiles(username, avatar_url)')
         .eq('drop_id', dropId)
         .order('created_at', ascending: true);
     return List<Map<String, dynamic>>.from(rows);
@@ -290,12 +290,44 @@ class SupabaseService {
     required String userId,
     String? displayName,
     String? homeCity,
+    String? avatarUrl,
   }) async {
     final updates = <String, dynamic>{};
     if (displayName != null) updates['display_name'] = displayName;
     if (homeCity != null) updates['home_city'] = homeCity;
+    if (avatarUrl != null) updates['avatar_url'] = avatarUrl;
     if (updates.isEmpty) return;
     await _client.from('profiles').update(updates).eq('id', userId);
+  }
+
+  /// Uploads a profile picture to the `avatars` bucket under the current
+  /// user's own folder (required by the storage RLS policies — see
+  /// v5-migration.sql), writes the resulting public URL onto the
+  /// profile row, and returns that URL so the caller can update local
+  /// state immediately without a round trip.
+  ///
+  /// Each upload gets a fresh, cache-busting filename rather than
+  /// overwriting a fixed `avatar.jpg` — CDNs and image widgets both
+  /// tend to cache aggressively by URL, and a stable filename would
+  /// mean a freshly-changed picture doesn't show up right away.
+  Future<String> uploadAvatar({
+    required Uint8List bytes,
+    String extension = 'jpg',
+  }) async {
+    final user = currentUser;
+    if (user == null) throw Exception('Must be signed in to change your avatar.');
+
+    final fileName = '${user.id}/${DateTime.now().millisecondsSinceEpoch}.$extension';
+
+    await _client.storage.from('avatars').uploadBinary(
+          fileName,
+          bytes,
+          fileOptions: FileOptions(upsert: false, contentType: 'image/$extension'),
+        );
+
+    final url = _client.storage.from('avatars').getPublicUrl(fileName);
+    await updateProfile(userId: user.id, avatarUrl: url);
+    return url;
   }
 
   Future<void> deleteAccount() async {

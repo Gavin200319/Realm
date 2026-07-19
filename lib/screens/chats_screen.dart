@@ -201,7 +201,12 @@ class _ChatsScreenState extends State<ChatsScreen> {
                   CircleAvatar(
                     radius: 22,
                     backgroundColor: RMColors.primaryDim,
-                    child: Icon(Icons.person_rounded, color: RMColors.primary),
+                    backgroundImage: c['other_avatar_url'] != null
+                        ? NetworkImage(c['other_avatar_url'] as String)
+                        : null,
+                    child: c['other_avatar_url'] == null
+                        ? Icon(Icons.person_rounded, color: RMColors.primary)
+                        : null,
                   ),
                   SizedBox(width: 12),
                   Expanded(
@@ -345,7 +350,12 @@ class _NewChatSheetState extends State<_NewChatSheet> {
                   return ListTile(
                     leading: CircleAvatar(
                       backgroundColor: RMColors.primaryDim,
-                      child: Icon(Icons.person_rounded, color: RMColors.primary),
+                      backgroundImage: r['avatar_url'] != null
+                          ? NetworkImage(r['avatar_url'] as String)
+                          : null,
+                      child: r['avatar_url'] == null
+                          ? Icon(Icons.person_rounded, color: RMColors.primary)
+                          : null,
                     ),
                     title: Text(r['username'] as String? ?? ''),
                     subtitle: Text(r['display_name'] as String? ?? ''),

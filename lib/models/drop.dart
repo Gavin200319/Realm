@@ -19,12 +19,17 @@ class DropMediaItem {
   final DropMediaType type;
   final int? sizeBytes;
   final String? name;
+  /// For videos only: a small pre-generated JPEG frame, uploaded
+  /// alongside the video, so feed/grid views can show a lightweight
+  /// static image instead of spinning up a real video player per card.
+  final String? thumbUrl;
 
   DropMediaItem({
     required this.url,
     required this.type,
     this.sizeBytes,
     this.name,
+    this.thumbUrl,
   });
 
   factory DropMediaItem.fromMap(Map<String, dynamic> map) {
@@ -33,6 +38,7 @@ class DropMediaItem {
       type: parseDropMediaType(map['type'] as String?) ?? DropMediaType.photo,
       sizeBytes: (map['size_bytes'] as num?)?.toInt(),
       name: map['name'] as String?,
+      thumbUrl: map['thumb_url'] as String?,
     );
   }
 
@@ -45,6 +51,7 @@ class DropMediaItem {
         },
         'size_bytes': sizeBytes,
         'name': name,
+        'thumb_url': thumbUrl,
       };
 
   /// Human-readable size, e.g. "1.4 MB". Returns null if unknown.

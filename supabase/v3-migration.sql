@@ -11,7 +11,10 @@
 -- media_items: full list of attachments for this drop (photos, videos,
 --   documents — a drop can now carry more than one file). Each element:
 --   { "url": text, "type": "photo"|"video"|"document",
---     "size_bytes": bigint, "name": text }
+--     "size_bytes": bigint, "name": text, "thumb_url": text|null }
+--   thumb_url (added later, client-side only — no migration needed since
+--   this column is jsonb) holds a small static JPEG frame for videos, so
+--   the feed can show a lightweight image instead of a real video player.
 -- media_url/media_type stay in sync with media_items[0] for backward
 -- compatibility with anything still reading the single-media fields.
 ALTER TABLE public.drops
