@@ -194,7 +194,7 @@ class CompassScreenState extends State<CompassScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Compass'),
+            Text('Private Drops'),
             if (!_loading && (_position != null || (_offline && _nearby.isNotEmpty)))
               Text(
                 _offline

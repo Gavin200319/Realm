@@ -33,10 +33,10 @@ class _HomeShellState extends State<HomeShell> {
         _feedKey.currentState?.refresh();
         break;
       case 1:
-        _compassKey.currentState?.refresh();
+        _flicksKey.currentState?.refresh();
         break;
       case 2:
-        _flicksKey.currentState?.refresh();
+        _compassKey.currentState?.refresh();
         break;
     }
   }
@@ -56,8 +56,8 @@ class _HomeShellState extends State<HomeShell> {
         // own internal notion of "active page" within its feed.
         children: [
           FeedScreen(key: _feedKey),
+          FlicksScreen(key: _flicksKey, isActive: _currentIndex == 1),
           CompassScreen(key: _compassKey),
-          FlicksScreen(key: _flicksKey, isActive: _currentIndex == 2),
           ChatsScreen(),
         ],
       ),
@@ -75,14 +75,7 @@ class _HomeShellState extends State<HomeShell> {
             NavigationDestination(
               icon: Icon(Icons.explore_outlined, color: RMColors.textSecondary),
               selectedIcon: Icon(Icons.explore_rounded, color: RMColors.primary),
-              label: 'Explore',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.navigation_outlined,
-                  color: RMColors.textSecondary),
-              selectedIcon:
-                  Icon(Icons.navigation_rounded, color: RMColors.primary),
-              label: 'Compass',
+              label: 'Realm',
             ),
             NavigationDestination(
               icon: Icon(Icons.movie_creation_outlined,
@@ -90,6 +83,13 @@ class _HomeShellState extends State<HomeShell> {
               selectedIcon:
                   Icon(Icons.movie_creation_rounded, color: RMColors.primary),
               label: 'Flicks',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.navigation_outlined,
+                  color: RMColors.textSecondary),
+              selectedIcon:
+                  Icon(Icons.navigation_rounded, color: RMColors.primary),
+              label: 'Private Drops',
             ),
             NavigationDestination(
               icon: Icon(Icons.chat_bubble_outline_rounded,

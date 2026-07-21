@@ -76,7 +76,7 @@ class _DropCardState extends State<DropCard> {
         duration: Duration(milliseconds: 200),
         decoration: BoxDecoration(
           color: RMColors.surface,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(18),
           border: Border.all(
             color: canUnlock
                 ? RMColors.accent.withOpacity(0.6)
@@ -91,13 +91,13 @@ class _DropCardState extends State<DropCard> {
           children: [
             // ── Location badge — always on top of the post ──────────
             Padding(
-              padding: EdgeInsets.fromLTRB(14, 12, 14, 8),
+              padding: EdgeInsets.fromLTRB(16, 14, 16, 10),
               child: Row(
                 children: [
                   Icon(Icons.location_on_rounded,
-                      size: 14,
+                      size: 15,
                       color: locked ? RMColors.textHint : RMColors.primary),
-                  SizedBox(width: 5),
+                  SizedBox(width: 6),
                   Expanded(
                     child: Text(
                       _locationText,
@@ -106,7 +106,7 @@ class _DropCardState extends State<DropCard> {
                       style: TextStyle(
                         color:
                             locked ? RMColors.textHint : RMColors.textPrimary,
-                        fontSize: 12,
+                        fontSize: 13,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -114,16 +114,16 @@ class _DropCardState extends State<DropCard> {
                   if (drop.isRestricted)
                     Container(
                       padding:
-                          EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                       decoration: BoxDecoration(
                         color: RMColors.primaryDim,
-                        borderRadius: BorderRadius.circular(4),
+                        borderRadius: BorderRadius.circular(5),
                       ),
                       child: Text(
                         drop.visibilityLabel,
                         style: TextStyle(
                             color: RMColors.primary,
-                            fontSize: 9,
+                            fontSize: 10,
                             fontWeight: FontWeight.w700,
                             letterSpacing: 0.5),
                       ),
@@ -134,24 +134,28 @@ class _DropCardState extends State<DropCard> {
 
             // ── Media thumbnail ───────────────────────────────────────
             Padding(
-              padding: EdgeInsets.symmetric(horizontal: 10),
-              child: MediaThumbnailPreview(item: media, locked: locked),
+              padding: EdgeInsets.symmetric(horizontal: 12),
+              child: MediaThumbnailPreview(
+                item: media,
+                locked: locked,
+                height: 260,
+              ),
             ),
-            SizedBox(height: 12),
+            SizedBox(height: 14),
 
             // ── Caption + meta + unlock affordance ────────────────────
             Padding(
-              padding: EdgeInsets.fromLTRB(14, 0, 14, 14),
+              padding: EdgeInsets.fromLTRB(16, 0, 16, 16),
               child: Row(
                 children: [
                   Container(
-                    width: 36,
-                    height: 36,
+                    width: 42,
+                    height: 42,
                     decoration: BoxDecoration(
                       color: locked
                           ? RMColors.surfaceAlt
                           : RMColors.success.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(12),
                     ),
                     child: Icon(
                       locked
@@ -162,10 +166,10 @@ class _DropCardState extends State<DropCard> {
                       color: locked
                           ? (canUnlock ? RMColors.accent : RMColors.textHint)
                           : RMColors.success,
-                      size: 17,
+                      size: 19,
                     ),
                   ),
-                  SizedBox(width: 12),
+                  SizedBox(width: 14),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -179,13 +183,13 @@ class _DropCardState extends State<DropCard> {
                                 ? RMColors.textSecondary
                                 : RMColors.textPrimary,
                             fontWeight: FontWeight.w600,
-                            fontSize: 14,
+                            fontSize: 15,
                             fontStyle:
                                 locked ? FontStyle.italic : FontStyle.normal,
                           ),
                         ),
                         if (!locked) ...[
-                          SizedBox(height: 2),
+                          SizedBox(height: 3),
                           Text('by ${drop.creatorUsername}',
                               style: Theme.of(context).textTheme.bodySmall),
                         ],
@@ -195,7 +199,7 @@ class _DropCardState extends State<DropCard> {
                   if (canUnlock)
                     Container(
                       padding:
-                          EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
                         color: RMColors.accent.withOpacity(0.15),
                         borderRadius: BorderRadius.circular(8),
@@ -206,7 +210,7 @@ class _DropCardState extends State<DropCard> {
                         'Unlock',
                         style: TextStyle(
                             color: RMColors.accent,
-                            fontSize: 11,
+                            fontSize: 12,
                             fontWeight: FontWeight.w700),
                       ),
                     )

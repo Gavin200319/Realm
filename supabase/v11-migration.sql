@@ -6,14 +6,18 @@
 
 -- 1. Statuses ---------------------------------------------------------------
 -- A status is a single photo or short video that's only ever visible
--- for STATUS_LIFESPAN after it's posted. `expires_at` is a generated
--- column (not just something the client computes) so the 12h cutoff
--- is enforced by Postgres itself — see the SELECT policy below — and
--- not just by client code that a modified client could skip.
+-- for STATUS_LIFESPAN after it's posted. `expires_at` is set by its
+-- own DEFAULT (evaluated at insert time, same as `created_at`) rather
+-- than as a GENERATED column — Postgres requires generated-column
+-- expressions to be IMMUTABLE, and the timestamptz + interval operator
+-- is only STABLE, so `GENERATED ALWAYS AS (created_at + interval ...)`
+-- fails with "42P17: generation expression is not immutable" even
+-- though the interval itself is a fixed duration. A same-transaction
+-- DEFAULT has no such restriction and lands within the same instant.
 --
 -- NOTE: the "12 hours" lifespan appears in exactly one place below
--- (the generated column expression). Change it there if it ever needs
--- to move — nowhere else in this migration hardcodes it.
+-- (the expires_at default). Change it there if it ever needs to move
+-- — nowhere else in this migration hardcodes it.
 CREATE TABLE IF NOT EXISTS public.statuses (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   creator_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
@@ -21,7 +25,7 @@ CREATE TABLE IF NOT EXISTS public.statuses (
   media_type text NOT NULL CHECK (media_type IN ('photo', 'video')),
   caption text CHECK (char_length(caption) <= 280),
   created_at timestamptz NOT NULL DEFAULT now(),
-  expires_at timestamptz GENERATED ALWAYS AS (created_at + interval '12 hours') STORED
+  expires_at timestamptz NOT NULL DEFAULT (now() + interval '12 hours')
 );
 
 CREATE INDEX IF NOT EXISTS statuses_creator_idx ON public.statuses (creator_id);

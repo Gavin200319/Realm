@@ -41,6 +41,7 @@ class FeedScreenState extends State<FeedScreen> with TickerProviderStateMixin {
   bool _fetchInFlight = false;
   String? _avatarUrl;
   final _statusStripKey = GlobalKey<StatusStripState>();
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
 
   @override
   void initState() {
@@ -246,15 +247,21 @@ class FeedScreenState extends State<FeedScreen> with TickerProviderStateMixin {
     return Stack(
       children: [
         Scaffold(
+          key: _scaffoldKey,
           backgroundColor: RMColors.background,
           drawer: const MessagesDrawer(),
           drawerEdgeDragWidth: 40,
           appBar: AppBar(
             backgroundColor: RMColors.background,
+            leading: IconButton(
+              icon: Icon(Icons.mail_outline_rounded),
+              tooltip: 'Messages',
+              onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+            ),
             title: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Explore'),
+                Text('Realm'),
                 if (_position != null || (_offline && _drops.isNotEmpty))
                   Text(
                     _offline
@@ -313,7 +320,7 @@ class FeedScreenState extends State<FeedScreen> with TickerProviderStateMixin {
                     ),
                   ),
                 );
-                if (_position != null) await _fetchDrops(_position!);
+                if (_position != null) await _fetchDrops(_position!, force: true);
               },
               backgroundColor: RMColors.primary,
               foregroundColor: Colors.white,
@@ -343,7 +350,7 @@ class FeedScreenState extends State<FeedScreen> with TickerProviderStateMixin {
               TutorialStep(
                 icon: Icons.navigation_rounded,
                 title: 'Find your way',
-                body: 'Switch to the Compass tab to see which direction the nearest locked drop is in, and how far away it is.',
+                body: 'Switch to the Private Drops tab to see which direction the nearest locked drop is in, and how far away it is.',
               ),
             ],
             onDone: () async {
