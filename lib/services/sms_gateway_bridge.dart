@@ -41,6 +41,11 @@ class SmsGatewayBridge {
   GatewayStatus _status = GatewayStatus.stopped;
   GatewayStatus get status => _status;
 
+  /// Set whenever [status] becomes [GatewayStatus.error] — the raw
+  /// exception message, so GatewaySetupScreen can show *why* it
+  /// failed instead of just hanging on "Starting...".
+  String? lastError;
+
   void _setStatus(GatewayStatus s) {
     _status = s;
     _statusController.add(s);
@@ -67,66 +72,82 @@ class SmsGatewayBridge {
   Future<void> start({String label = 'SMS Gateway'}) async {
     if (_running) return;
     _setStatus(GatewayStatus.starting);
-
-    if (!await hasPermissions()) {
-      _setStatus(GatewayStatus.missingPermissions);
-      return;
-    }
-
-    final prefs = await SharedPreferences.getInstance();
-    final existing = prefs.getString(_prefsDeviceIdKey);
-
-    String? simNumber;
-    try {
-      simNumber = await _methodChannel.invokeMethod<String>('getSimNumber');
-    } catch (_) {
-      // Not all SIMs/carriers report their own number — fine, it's
-      // purely informational on the server.
-    }
-
-    final id = await _service.registerGatewayDevice(
-      existingDeviceId: existing,
-      label: label,
-      simPhoneNumber: simNumber,
-    );
-    _deviceId = id;
-    await prefs.setString(_prefsDeviceIdKey, id);
+    lastError = null;
 
     try {
-      await _methodChannel.invokeMethod('startForegroundService');
-    } on PlatformException catch (_) {
-      // Foreground service failed to start (e.g. permission revoked
-      // mid-flight) — still proceed with best-effort polling; the
-      // status stream below reflects degraded reliability to the UI.
-    }
-
-    _incomingSub = _incomingSmsChannel.receiveBroadcastStream().listen(
-      _onNativeIncomingSms,
-      onError: (_) {},
-    );
-
-    _running = true;
-    _setStatus(GatewayStatus.online);
-
-    // React instantly to new outbound rows...
-    _outboxChannel = _service.watchOutboxChanges(
-      gatewayDeviceId: id,
-      onChange: _drainOutbox,
-    );
-    // ...and also poll on an interval as a safety net, since a missed
-    // realtime event (reconnect gap, backgrounded process) shouldn't
-    // mean a queued text sits forever.
-    _pollTimer = Timer.periodic(const Duration(seconds: 15), (_) => _drainOutbox());
-    _heartbeatTimer = Timer.periodic(const Duration(minutes: 2), (_) {
-      if (_deviceId != null) {
-        _service.registerGatewayDevice(existingDeviceId: _deviceId, label: label);
+      if (!await hasPermissions()) {
+        _setStatus(GatewayStatus.missingPermissions);
+        return;
       }
-    });
 
-    unawaited(_drainOutbox());
+      if (Supabase.instance.client.auth.currentSession == null) {
+        throw StateError('Not signed in — open the app and sign in first.');
+      }
 
-    final prefs2 = await SharedPreferences.getInstance();
-    await prefs2.setBool(_prefsShouldRunKey, true);
+      final prefs = await SharedPreferences.getInstance();
+      final existing = prefs.getString(_prefsDeviceIdKey);
+
+      String? simNumber;
+      try {
+        simNumber = await _methodChannel.invokeMethod<String>('getSimNumber');
+      } catch (_) {
+        // Not all SIMs/carriers report their own number — fine, it's
+        // purely informational on the server.
+      }
+
+      final id = await _service.registerGatewayDevice(
+        existingDeviceId: existing,
+        label: label,
+        simPhoneNumber: simNumber,
+      );
+      _deviceId = id;
+      await prefs.setString(_prefsDeviceIdKey, id);
+
+      try {
+        await _methodChannel.invokeMethod('startForegroundService');
+      } on PlatformException catch (_) {
+        // Foreground service failed to start (e.g. permission revoked
+        // mid-flight) — still proceed with best-effort polling; the
+        // status stream below reflects degraded reliability to the UI.
+      }
+
+      _incomingSub = _incomingSmsChannel.receiveBroadcastStream().listen(
+        _onNativeIncomingSms,
+        onError: (_) {},
+      );
+
+      _running = true;
+      _setStatus(GatewayStatus.online);
+
+      // React instantly to new outbound rows...
+      _outboxChannel = _service.watchOutboxChanges(
+        gatewayDeviceId: id,
+        onChange: _drainOutbox,
+      );
+      // ...and also poll on an interval as a safety net, since a missed
+      // realtime event (reconnect gap, backgrounded process) shouldn't
+      // mean a queued text sits forever.
+      _pollTimer = Timer.periodic(const Duration(seconds: 15), (_) => _drainOutbox());
+      _heartbeatTimer = Timer.periodic(const Duration(minutes: 2), (_) {
+        if (_deviceId != null) {
+          _service.registerGatewayDevice(existingDeviceId: _deviceId, label: label);
+        }
+      });
+
+      unawaited(_drainOutbox());
+
+      final prefs2 = await SharedPreferences.getInstance();
+      await prefs2.setBool(_prefsShouldRunKey, true);
+    } catch (e) {
+      // Anything above can legitimately fail on a first run: the
+      // v14-migration.sql RPCs not applied yet in Supabase, no
+      // network, or (via resumeIfNeeded) not signed in yet. Whatever
+      // it is, land on a visible error state instead of leaving the
+      // screen stuck on "Starting..." forever.
+      _running = false;
+      lastError = e.toString();
+      _setStatus(GatewayStatus.error);
+    }
   }
 
   /// Call once at app startup (after Supabase auth is restored). If
@@ -223,4 +244,4 @@ class SmsGatewayBridge {
   }
 }
 
-enum GatewayStatus { stopped, starting, online, missingPermissions }
+enum GatewayStatus { stopped, starting, online, missingPermissions, error }

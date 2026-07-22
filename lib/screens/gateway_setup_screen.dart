@@ -72,8 +72,16 @@ class _GatewaySetupScreenState extends State<GatewaySetupScreen> {
             child: Row(
               children: [
                 Icon(
-                  running ? Icons.sms_rounded : Icons.sms_outlined,
-                  color: running ? Colors.greenAccent : RMColors.textSecondary,
+                  running
+                      ? Icons.sms_rounded
+                      : (_status == GatewayStatus.error
+                          ? Icons.error_outline_rounded
+                          : Icons.sms_outlined),
+                  color: running
+                      ? Colors.greenAccent
+                      : (_status == GatewayStatus.error
+                          ? Colors.redAccent
+                          : RMColors.textSecondary),
                   size: 32,
                 ),
                 SizedBox(width: 14),
@@ -127,6 +135,27 @@ class _GatewaySetupScreenState extends State<GatewaySetupScreen> {
               style: TextStyle(color: Colors.redAccent, fontSize: 12),
             ),
           ],
+          if (_status == GatewayStatus.error && _bridge.lastError != null) ...[
+            SizedBox(height: 12),
+            Container(
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.redAccent.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.redAccent.withOpacity(0.3)),
+              ),
+              child: Text(
+                _bridge.lastError!,
+                style: TextStyle(color: Colors.redAccent, fontSize: 12),
+              ),
+            ),
+            SizedBox(height: 4),
+            Text(
+              'If this mentions a missing function or "does not exist", the '
+              'v14-migration.sql file hasn\'t been run in Supabase yet.',
+              style: TextStyle(color: RMColors.textSecondary, fontSize: 11),
+            ),
+          ],
           SizedBox(height: 28),
           Text('How this works',
               style: TextStyle(
@@ -161,6 +190,8 @@ class _GatewaySetupScreenState extends State<GatewaySetupScreen> {
         return 'Starting...';
       case GatewayStatus.missingPermissions:
         return 'Missing SMS permissions';
+      case GatewayStatus.error:
+        return 'Could not start';
       case GatewayStatus.stopped:
         return 'Gateway is off';
     }
