@@ -6,6 +6,7 @@ import '../services/supabase_service.dart';
 import '../services/cached_media.dart';
 import '../services/local_cache_service.dart';
 import '../theme/rm_theme.dart';
+import '../widgets/emoji_input.dart';
 import 'create_flick_screen.dart';
 
 /// Instagram-Reels-style video feed — except pages swipe *left/right*
@@ -670,6 +671,13 @@ class _FlickCommentsCarouselState extends State<_FlickCommentsCarousel> {
                               onSubmitted: (_) => _postReply(comment),
                             ),
                           ),
+                          EmojiSheetButton(
+                            controller: _replyCtrl,
+                            color: Colors.white70,
+                            iconSize: 18,
+                            compact: true,
+                          ),
+                          SizedBox(width: 6),
                           _postingReply
                               ? SizedBox(
                                   width: 16,
@@ -918,6 +926,13 @@ class _ComposeRow extends StatelessWidget {
               onSubmitted: (_) => onSubmit(),
             ),
           ),
+          EmojiSheetButton(
+            controller: controller,
+            color: Colors.white70,
+            iconSize: 18,
+            compact: true,
+          ),
+          SizedBox(width: 6),
           posting
               ? SizedBox(
                   width: 16,

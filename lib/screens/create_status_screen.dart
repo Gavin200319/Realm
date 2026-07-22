@@ -6,6 +6,7 @@ import 'package:video_player/video_player.dart';
 import '../services/data_saver_service.dart';
 import '../services/supabase_service.dart';
 import '../theme/rm_theme.dart';
+import '../widgets/emoji_input.dart';
 
 /// Posting flow for a single status: pick a photo or a short video,
 /// preview it, add an optional caption, then upload. Unlike
@@ -181,6 +182,10 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
                           borderSide: BorderSide.none,
+                        ),
+                        suffixIcon: EmojiSheetButton(
+                          controller: _captionCtrl,
+                          color: Colors.white70,
                         ),
                       ),
                     ),

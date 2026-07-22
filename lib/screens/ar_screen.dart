@@ -25,6 +25,7 @@ import '../services/drop_events.dart';
 import '../services/location_service.dart';
 import '../services/supabase_service.dart';
 import '../theme/rm_theme.dart';
+import '../widgets/emoji_input.dart';
 import 'drop_detail_screen.dart';
 
 class ARScreen extends StatefulWidget {
@@ -356,9 +357,10 @@ class _ARScreenState extends State<ARScreen> with TickerProviderStateMixin {
               TextField(
                 controller: customCtrl,
                 style: const TextStyle(color: RMColors.textPrimary),
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   hintText: 'Or type your own label…',
-                  hintStyle: TextStyle(color: RMColors.textHint),
+                  hintStyle: const TextStyle(color: RMColors.textHint),
+                  suffixIcon: EmojiSheetButton(controller: customCtrl),
                 ),
                 onSubmitted: (v) {
                   if (v.trim().isNotEmpty) {

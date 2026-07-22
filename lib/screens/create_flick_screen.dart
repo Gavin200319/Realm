@@ -8,6 +8,7 @@ import 'package:video_player/video_player.dart';
 import '../services/data_saver_service.dart';
 import '../services/supabase_service.dart';
 import '../theme/rm_theme.dart';
+import '../widgets/emoji_input.dart';
 
 /// Posting flow for a single Flick: pick or record a video, preview it,
 /// add an optional caption, then upload. Videos over
@@ -171,6 +172,10 @@ class _CreateFlickScreenState extends State<CreateFlickScreen> {
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
                           borderSide: BorderSide.none,
+                        ),
+                        suffixIcon: EmojiSheetButton(
+                          controller: _captionCtrl,
+                          color: Colors.white70,
                         ),
                       ),
                     ),

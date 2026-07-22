@@ -9,6 +9,7 @@ import '../services/privacy_settings_sync_service.dart';
 import '../services/supabase_service.dart';
 import '../theme/rm_theme.dart';
 import '../widgets/location_autocomplete_field.dart';
+import '../widgets/emoji_input.dart';
 import 'followers_screen.dart';
 import 'my_drops_gallery_screen.dart';
 
@@ -455,8 +456,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
             TextField(
               controller: displayCtrl,
               style: TextStyle(color: RMColors.textPrimary),
-              decoration:
-                  InputDecoration(labelText: 'Display name'),
+              decoration: InputDecoration(
+                labelText: 'Display name',
+                suffixIcon: EmojiSheetButton(
+                  controller: displayCtrl,
+                  color: RMColors.textSecondary,
+                ),
+              ),
             ),
             SizedBox(height: 14),
             LocationAutocompleteField(

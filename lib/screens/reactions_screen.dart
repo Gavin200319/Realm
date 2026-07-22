@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:intl/intl.dart';
 import '../services/supabase_service.dart';
+import '../widgets/emoji_input.dart';
 
 class ReactionsScreen extends StatefulWidget {
   final String dropId;
@@ -213,6 +214,9 @@ class _ReactionsScreenState extends State<ReactionsScreen> {
                               isDense: true,
                               contentPadding: EdgeInsets.symmetric(
                                   horizontal: 12, vertical: 10),
+                              suffixIcon: EmojiSheetButton(
+                                controller: _commentCtrl,
+                              ),
                             ),
                             onSubmitted: (_) => _postComment(),
                           ),

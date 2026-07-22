@@ -15,6 +15,7 @@ import '../theme/rm_theme.dart';
 import '../widgets/tutorial_overlay.dart';
 import '../widgets/location_autocomplete_field.dart';
 import '../widgets/upload_progress_toast.dart';
+import '../widgets/emoji_input.dart';
 
 /// Argument bundle for [_resizeAndEncodeJpeg] — `compute` requires a
 /// single argument, so the resize/quality settings travel with the bytes.
@@ -506,6 +507,13 @@ class _CreateDropScreenState extends State<CreateDropScreen>
                     decoration: InputDecoration(
                       labelText: 'What do you want to leave here?',
                       counterStyle: TextStyle(color: RMColors.textHint),
+                      suffixIcon: Padding(
+                        padding: EdgeInsets.only(right: 4),
+                        child: EmojiSheetButton(
+                          controller: _captionCtrl,
+                          color: RMColors.textSecondary,
+                        ),
+                      ),
                     ),
                   ),
                   SizedBox(height: 16),

@@ -92,14 +92,14 @@ class StatusStripState extends State<StatusStrip> {
     // strip of skeleton loaders for a feature nobody's posted to yet,
     // just show the "add yours" bubble alone once loading settles.
     if (_loading && _entries.isEmpty) {
-      return const SizedBox(height: 96);
+      return const SizedBox(height: 100);
     }
 
     final others = _others;
     final mine = _myEntry;
 
     return SizedBox(
-      height: 96,
+      height: 100,
       child: ListView(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),

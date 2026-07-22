@@ -4,6 +4,8 @@ import 'package:intl/intl.dart';
 import '../services/supabase_service.dart';
 import '../services/app_storage_service.dart';
 import '../theme/rm_theme.dart';
+import '../widgets/emoji_input.dart';
+import '../widgets/emoji_picker_panel.dart';
 
 class ChatConversationScreen extends StatefulWidget {
   final String otherUserId;
@@ -22,8 +24,15 @@ class ChatConversationScreen extends StatefulWidget {
 
 class _ChatConversationScreenState extends State<ChatConversationScreen> {
   final _msgCtrl = TextEditingController();
+  final _msgFocus = FocusNode();
   final _scrollCtrl = ScrollController();
   StreamSubscription<List<Map<String, dynamic>>>? _sub;
+
+  // Whether the emoji panel is showing in place of the system keyboard.
+  // Mirrors the WhatsApp/Telegram pattern: tapping the emoji icon
+  // dismisses the keyboard and swaps in the panel; tapping the text
+  // field (or the icon again) swaps back.
+  bool _showEmojiPanel = false;
 
   // Messages Supabase has actually persisted for this thread.
   List<Map<String, dynamic>> _serverMessages = [];
@@ -222,8 +231,26 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
   void dispose() {
     _sub?.cancel();
     _msgCtrl.dispose();
+    _msgFocus.dispose();
     _scrollCtrl.dispose();
     super.dispose();
+  }
+
+  /// Inserts at the cursor and steps backspace by full grapheme
+  /// cluster — see `widgets/emoji_input.dart` for the shared logic
+  /// used by every other emoji-enabled field in the app too.
+  void _insertEmoji(String emoji) => insertEmojiIntoController(_msgCtrl, emoji);
+
+  void _backspaceEmoji() => backspaceEmojiFromController(_msgCtrl);
+
+  void _toggleEmojiPanel() {
+    if (_showEmojiPanel) {
+      setState(() => _showEmojiPanel = false);
+      _msgFocus.requestFocus();
+    } else {
+      _msgFocus.unfocus();
+      setState(() => _showEmojiPanel = true);
+    }
   }
 
   @override
@@ -282,38 +309,67 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
                           ),
           ),
           SafeArea(
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(12, 8, 12, 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _msgCtrl,
-                      minLines: 1,
-                      maxLines: 4,
-                      textCapitalization: TextCapitalization.sentences,
-                      decoration: InputDecoration(
-                        hintText: 'Message...',
-                        isDense: true,
-                        contentPadding: EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 12),
+            top: false,
+            child: Column(
+              children: [
+                Padding(
+                  padding: EdgeInsets.fromLTRB(12, 8, 12, 8),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        icon: Icon(
+                          _showEmojiPanel
+                              ? Icons.keyboard_rounded
+                              : Icons.emoji_emotions_outlined,
+                          color: RMColors.textSecondary,
+                        ),
+                        tooltip: 'Emoji',
+                        onPressed: _toggleEmojiPanel,
                       ),
-                      onSubmitted: (_) => _send(),
-                    ),
+                      Expanded(
+                        child: TextField(
+                          controller: _msgCtrl,
+                          focusNode: _msgFocus,
+                          minLines: 1,
+                          maxLines: 4,
+                          textCapitalization: TextCapitalization.sentences,
+                          onTap: () {
+                            // Tapping back into the field always hands
+                            // control back to the system keyboard, even
+                            // if the emoji panel was open.
+                            if (_showEmojiPanel) {
+                              setState(() => _showEmojiPanel = false);
+                            }
+                          },
+                          decoration: InputDecoration(
+                            hintText: 'Message...',
+                            isDense: true,
+                            contentPadding: EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 12),
+                          ),
+                          onSubmitted: (_) => _send(),
+                        ),
+                      ),
+                      SizedBox(width: 8),
+                      IconButton.filled(
+                        onPressed: _sending ? null : _send,
+                        icon: _sending
+                            ? SizedBox(
+                                height: 18,
+                                width: 18,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: Colors.white))
+                            : Icon(Icons.send_rounded),
+                      ),
+                    ],
                   ),
-                  SizedBox(width: 8),
-                  IconButton.filled(
-                    onPressed: _sending ? null : _send,
-                    icon: _sending
-                        ? SizedBox(
-                            height: 18,
-                            width: 18,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white))
-                        : Icon(Icons.send_rounded),
+                ),
+                if (_showEmojiPanel)
+                  EmojiPickerPanel(
+                    onEmojiSelected: _insertEmoji,
+                    onBackspace: _backspaceEmoji,
                   ),
-                ],
-              ),
+              ],
             ),
           ),
         ],
