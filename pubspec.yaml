@@ -30,6 +30,7 @@ dependencies:
   flutter_cache_manager: ^3.4.1
   connectivity_plus: ^6.0.5
   flutter_secure_storage: ^9.2.2
+  xml: ^6.5.0
 
 dev_dependencies:
   flutter_test:

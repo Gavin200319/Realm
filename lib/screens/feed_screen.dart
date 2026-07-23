@@ -17,6 +17,7 @@ import 'create_drop_screen.dart';
 import 'profile_screen.dart';
 import 'drop_detail_screen.dart';
 import 'user_search_screen.dart';
+import 'updates_view.dart';
 
 class FeedScreen extends StatefulWidget {
   FeedScreen({super.key});
@@ -42,6 +43,12 @@ class FeedScreenState extends State<FeedScreen> with TickerProviderStateMixin {
   String? _avatarUrl;
   final _statusStripKey = GlobalKey<StatusStripState>();
   final _scaffoldKey = GlobalKey<ScaffoldState>();
+  final _updatesKey = GlobalKey<UpdatesViewState>();
+
+  // Drops / Updates segmented toggle at the top of this tab. Kept as
+  // local UI state (not persisted) — always opens back on Drops,
+  // which is this tab's primary purpose.
+  int _section = 0; // 0 = Drops, 1 = Updates
 
   @override
   void initState() {
@@ -109,6 +116,7 @@ class FeedScreenState extends State<FeedScreen> with TickerProviderStateMixin {
     } else {
       await _initLocation();
     }
+    _updatesKey.currentState?.refresh();
   }
 
   Future<void> _checkTutorial() async {
@@ -261,7 +269,8 @@ class FeedScreenState extends State<FeedScreen> with TickerProviderStateMixin {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('Realm'),
-                if (_position != null || (_offline && _drops.isNotEmpty))
+                if (_section == 0 &&
+                    (_position != null || (_offline && _drops.isNotEmpty)))
                   Text(
                     _offline
                         ? '${_visibleDrops.length} drops nearby · offline, showing saved posts'
@@ -296,37 +305,44 @@ class FeedScreenState extends State<FeedScreen> with TickerProviderStateMixin {
             children: [
               StatusStrip(key: _statusStripKey),
               Divider(height: 1, color: RMColors.border),
+              _buildSectionToggle(),
               Expanded(
-                child: RefreshIndicator(
-                  color: RMColors.primary,
-                  backgroundColor: RMColors.surface,
-                  onRefresh: _initLocation,
-                  child: _buildBody(),
-                ),
+                child: _section == 0
+                    ? RefreshIndicator(
+                        color: RMColors.primary,
+                        backgroundColor: RMColors.surface,
+                        onRefresh: _initLocation,
+                        child: _buildBody(),
+                      )
+                    : UpdatesView(key: _updatesKey),
               ),
             ],
           ),
-          floatingActionButton: ScaleTransition(
-            scale: _fabScale,
-            child: FloatingActionButton.extended(
-              onPressed: () async {
-                if (_position == null) return;
-                await Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => CreateDropScreen(
-                      lat: _position!.latitude,
-                      lng: _position!.longitude,
-                    ),
+          floatingActionButton: _section == 0
+              ? ScaleTransition(
+                  scale: _fabScale,
+                  child: FloatingActionButton.extended(
+                    onPressed: () async {
+                      if (_position == null) return;
+                      await Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => CreateDropScreen(
+                            lat: _position!.latitude,
+                            lng: _position!.longitude,
+                          ),
+                        ),
+                      );
+                      if (_position != null) {
+                        await _fetchDrops(_position!, force: true);
+                      }
+                    },
+                    backgroundColor: RMColors.primary,
+                    foregroundColor: Colors.white,
+                    icon: Icon(Icons.add_location_alt_rounded),
+                    label: Text('Drop here'),
                   ),
-                );
-                if (_position != null) await _fetchDrops(_position!, force: true);
-              },
-              backgroundColor: RMColors.primary,
-              foregroundColor: Colors.white,
-              icon: Icon(Icons.add_location_alt_rounded),
-              label: Text('Drop here'),
-            ),
-          ),
+                )
+              : null,
         ),
         if (_showTutorial)
           TutorialOverlay(
@@ -353,6 +369,65 @@ class FeedScreenState extends State<FeedScreen> with TickerProviderStateMixin {
             },
           ),
       ],
+    );
+  }
+
+  /// Drops/Updates switch, styled to match the app's existing pill
+  /// controls rather than the default Material segmented button —
+  /// keeps this feeling like part of Realm rather than a bolted-on
+  /// news reader.
+  Widget _buildSectionToggle() {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(16, 10, 16, 6),
+      child: Container(
+        padding: EdgeInsets.all(3),
+        decoration: BoxDecoration(
+          color: RMColors.surfaceAlt,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Expanded(child: _sectionTab('Drops', Icons.explore_rounded, 0)),
+            Expanded(
+                child: _sectionTab('Updates', Icons.public_rounded, 1)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _sectionTab(String label, IconData icon, int index) {
+    final selected = _section == index;
+    return GestureDetector(
+      onTap: () {
+        if (_section == index) return;
+        setState(() => _section = index);
+      },
+      child: AnimatedContainer(
+        duration: Duration(milliseconds: 180),
+        padding: EdgeInsets.symmetric(vertical: 9),
+        decoration: BoxDecoration(
+          color: selected ? RMColors.primary : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon,
+                size: 16,
+                color: selected ? Colors.white : RMColors.textSecondary),
+            SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                color: selected ? Colors.white : RMColors.textSecondary,
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

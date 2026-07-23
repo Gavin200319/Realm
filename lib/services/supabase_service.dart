@@ -390,6 +390,48 @@ class SupabaseService {
     });
   }
 
+  // ---------------------------------------------------------------
+  // News comments (Updates tab)
+  // ---------------------------------------------------------------
+
+  /// Comments on a syndicated news story, newest first. [articleLink]
+  /// is the publisher's own URL — the article isn't stored here, so
+  /// its link doubles as the id comments hang off of.
+  Future<List<Map<String, dynamic>>> fetchNewsComments(
+      String articleLink) async {
+    final rows = await _client
+        .from('news_comments')
+        .select('*, profiles(username, avatar_url)')
+        .eq('article_link', articleLink)
+        .order('created_at', ascending: false);
+    return List<Map<String, dynamic>>.from(rows);
+  }
+
+  Future<void> addNewsComment({
+    required String articleLink,
+    required String articleTitle,
+    required String content,
+  }) async {
+    await _client.from('news_comments').insert({
+      'user_id': currentUser!.id,
+      'article_link': articleLink,
+      'article_title': articleTitle,
+      'content': content,
+    });
+  }
+
+  Future<void> deleteNewsComment(String commentId) async {
+    await _client.from('news_comments').delete().eq('id', commentId);
+  }
+
+  /// Count only — used on the card itself so opening every story's
+  /// full comment thread isn't required just to show a number.
+  Future<int> fetchNewsCommentCount(String articleLink) async {
+    final result = await _client.rpc('news_comment_count',
+        params: {'target_article_link': articleLink});
+    return (result as num).toInt();
+  }
+
   Future<ProfileStats?> fetchProfileStats(String userId) async {
     final row = await _client
         .from('profile_stats')

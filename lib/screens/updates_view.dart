@@ -1,0 +1,221 @@
+import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../models/news_article.dart';
+import '../services/news_service.dart';
+import '../services/supabase_service.dart';
+import '../services/local_cache_service.dart';
+import '../theme/rm_theme.dart';
+import '../widgets/news_card.dart';
+import 'news_comments_sheet.dart';
+
+/// The "Updates" side of the Realm tab's Drops/Updates toggle — real
+/// news, syndicated from Kenyan outlets first (general + entertainment),
+/// then Africa, then the rest of the world. Every card links back to
+/// the original publisher; nothing here is stored or reproduced beyond
+/// a headline and a short summary.
+class UpdatesView extends StatefulWidget {
+  const UpdatesView({super.key});
+
+  @override
+  State<UpdatesView> createState() => UpdatesViewState();
+}
+
+class UpdatesViewState extends State<UpdatesView> {
+  static const _cacheKey = 'news_updates';
+
+  List<NewsArticle> _articles = [];
+  bool _loading = true;
+  bool _offline = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCached();
+    refresh();
+  }
+
+  Future<void> _loadCached() async {
+    final cached = await LocalCacheService.instance.loadList(_cacheKey);
+    if (cached != null && cached.isNotEmpty && mounted && _articles.isEmpty) {
+      setState(() {
+        _articles = cached.map(NewsArticle.fromMap).toList();
+        _loading = false;
+      });
+    }
+  }
+
+  /// Called on pull-to-refresh, and whenever the Updates segment is
+  /// (re)selected from [FeedScreen] — same "never sit on stale data"
+  /// contract as the Drops feed.
+  Future<void> refresh() async {
+    if (_articles.isEmpty) setState(() { _loading = true; _error = null; });
+    try {
+      final articles = await NewsService.instance.latest();
+      if (mounted) {
+        setState(() {
+          _articles = articles;
+          _offline = false;
+          _error = null;
+        });
+      }
+      await LocalCacheService.instance
+          .saveList(_cacheKey, articles.map((a) => a.toMap()).toList());
+    } catch (e) {
+      if (mounted) {
+        if (_articles.isNotEmpty) {
+          setState(() => _offline = true);
+        } else {
+          setState(() => _error = 'Could not load news right now.');
+        }
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _openStory(NewsArticle article) async {
+    final uri = Uri.tryParse(article.link);
+    if (uri == null) return;
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  Future<void> _openComments(NewsArticle article) {
+    return showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => NewsCommentsSheet(article: article),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading && _articles.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(color: RMColors.primary),
+            SizedBox(height: 16),
+            Text('Fetching the latest…',
+                style: TextStyle(color: RMColors.textSecondary)),
+          ],
+        ),
+      );
+    }
+    if (_error != null && _articles.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.wifi_off_rounded, color: RMColors.textHint, size: 48),
+              SizedBox(height: 16),
+              Text(_error!,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: RMColors.textSecondary)),
+              SizedBox(height: 20),
+              OutlinedButton(onPressed: refresh, child: Text('Try again')),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      color: RMColors.primary,
+      backgroundColor: RMColors.surface,
+      onRefresh: refresh,
+      child: ListView.separated(
+        physics: AlwaysScrollableScrollPhysics(),
+        padding: EdgeInsets.fromLTRB(16, 8, 16, 100),
+        itemCount: _articles.length + (_offline ? 1 : 0),
+        separatorBuilder: (_, __) => SizedBox(height: 12),
+        itemBuilder: (context, index) {
+          if (_offline && index == 0) {
+            return Container(
+              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: RMColors.surfaceAlt,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.cloud_off_rounded,
+                      size: 16, color: RMColors.textHint),
+                  SizedBox(width: 8),
+                  Text('Offline — showing saved stories',
+                      style: TextStyle(
+                          color: RMColors.textSecondary, fontSize: 12)),
+                ],
+              ),
+            );
+          }
+          final article = _articles[index - (_offline ? 1 : 0)];
+          return _NewsCardWithCount(
+            key: ValueKey(article.id),
+            article: article,
+            onOpenStory: () => _openStory(article),
+            onOpenComments: () => _openComments(article),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// Wraps [NewsCard] with a lazily-fetched comment count, resolved
+/// once per card the same way [DropCard] lazily resolves its place
+/// name — cheap, best-effort, and never blocks the card from showing.
+class _NewsCardWithCount extends StatefulWidget {
+  final NewsArticle article;
+  final VoidCallback onOpenStory;
+  final Future<void> Function() onOpenComments;
+
+  const _NewsCardWithCount({
+    super.key,
+    required this.article,
+    required this.onOpenStory,
+    required this.onOpenComments,
+  });
+
+  @override
+  State<_NewsCardWithCount> createState() => _NewsCardWithCountState();
+}
+
+class _NewsCardWithCountState extends State<_NewsCardWithCount> {
+  int? _count;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCount();
+  }
+
+  Future<void> _loadCount() async {
+    try {
+      final count =
+          await SupabaseService.instance.fetchNewsCommentCount(widget.article.link);
+      if (mounted) setState(() => _count = count);
+    } catch (_) {
+      // Best-effort — the card still works fine without a count.
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return NewsCard(
+      article: widget.article,
+      commentCount: _count,
+      onOpenStory: widget.onOpenStory,
+      onOpenComments: () async {
+        // Refresh the count once the sheet actually closes, in case
+        // the person just added a comment.
+        await widget.onOpenComments();
+        _loadCount();
+      },
+    );
+  }
+}
