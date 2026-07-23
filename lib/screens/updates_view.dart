@@ -4,6 +4,8 @@ import '../models/news_article.dart';
 import '../services/news_service.dart';
 import '../services/supabase_service.dart';
 import '../services/local_cache_service.dart';
+import '../services/article_image_service.dart';
+import '../services/generated_image_service.dart';
 import '../theme/rm_theme.dart';
 import '../widgets/news_card.dart';
 import 'news_comments_sheet.dart';
@@ -187,11 +189,22 @@ class _NewsCardWithCount extends StatefulWidget {
 
 class _NewsCardWithCountState extends State<_NewsCardWithCount> {
   int? _count;
+  NewsArticle? _resolvedArticle;
 
   @override
   void initState() {
     super.initState();
     _loadCount();
+    _resolveImageIfMissing();
+  }
+
+  @override
+  void didUpdateWidget(_NewsCardWithCount oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.article.id != widget.article.id) {
+      _resolvedArticle = null;
+      _resolveImageIfMissing();
+    }
   }
 
   Future<void> _loadCount() async {
@@ -200,14 +213,54 @@ class _NewsCardWithCountState extends State<_NewsCardWithCount> {
           await SupabaseService.instance.fetchNewsCommentCount(widget.article.link);
       if (mounted) setState(() => _count = count);
     } catch (_) {
-      // Best-effort — the card still works fine without a count.
+      // Best-effort — the count pill just stays generic without it.
+    }
+  }
+
+  /// If the feed didn't give us an image, first look one up from the
+  /// story's own page (see [ArticleImageService]); if that also comes
+  /// up empty, fall back to a generated illustration (see
+  /// [GeneratedImageService], which is itself a no-op unless the
+  /// person running this app has opted in with an API key). Same
+  /// "cheap, best-effort, never blocks the card" contract throughout.
+  Future<void> _resolveImageIfMissing() async {
+    if (widget.article.imageUrl != null) return;
+    try {
+      final result =
+          await ArticleImageService.instance.resolve(widget.article.link);
+      if (result != null) {
+        if (!mounted) return;
+        setState(() {
+          _resolvedArticle = widget.article.withResolvedImage(
+            imageUrl: result.imageUrl,
+            imageCredit: result.credit,
+          );
+        });
+        return;
+      }
+    } catch (_) {
+      // Fall through to the generated-illustration attempt below.
+    }
+
+    if (!GeneratedImageService.instance.shouldGenerate(widget.article)) {
+      return;
+    }
+    try {
+      final bytes =
+          await GeneratedImageService.instance.generate(widget.article);
+      if (bytes == null || !mounted) return;
+      setState(() {
+        _resolvedArticle = widget.article.withGeneratedImage(bytes);
+      });
+    } catch (_) {
+      // No image, generated or otherwise — the card still works fine.
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return NewsCard(
-      article: widget.article,
+      article: _resolvedArticle ?? widget.article,
       commentCount: _count,
       onOpenStory: widget.onOpenStory,
       onOpenComments: () async {

@@ -109,13 +109,106 @@ class NewsCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(14),
                   child: AspectRatio(
                     aspectRatio: 16 / 9,
-                    child: CachedNetworkImage(
-                      imageUrl: article.imageUrl!,
-                      fit: BoxFit.cover,
-                      placeholder: (_, __) =>
-                          Container(color: RMColors.surfaceAlt),
-                      errorWidget: (_, __, ___) =>
-                          Container(color: RMColors.surfaceAlt),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        CachedNetworkImage(
+                          imageUrl: article.imageUrl!,
+                          fit: BoxFit.cover,
+                          placeholder: (_, __) =>
+                              Container(color: RMColors.surfaceAlt),
+                          errorWidget: (_, __, ___) =>
+                              Container(color: RMColors.surfaceAlt),
+                        ),
+                        // Attribution line — only present for images
+                        // we resolved ourselves from the story's own
+                        // page (see ArticleImageService); a
+                        // feed-supplied image doesn't need this since
+                        // the publisher/source badge above already
+                        // covers it.
+                        if (article.imageCredit != null)
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            child: Container(
+                              padding: EdgeInsets.fromLTRB(10, 14, 10, 6),
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topCenter,
+                                  end: Alignment.bottomCenter,
+                                  colors: [
+                                    Colors.transparent,
+                                    Colors.black.withOpacity(0.55),
+                                  ],
+                                ),
+                              ),
+                              child: Text(
+                                article.imageCredit!,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.9),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              )
+            else if (article.generatedImageBytes != null)
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: 12),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(14),
+                  child: AspectRatio(
+                    aspectRatio: 16 / 9,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Image.memory(
+                          article.generatedImageBytes!,
+                          fit: BoxFit.cover,
+                        ),
+                        // Deliberately a solid, always-visible badge —
+                        // not the same subtle bottom-gradient treatment
+                        // as a real photo credit above. This image
+                        // isn't a photo of the story; nothing about
+                        // its presentation should let it read as one.
+                        Positioned(
+                          top: 10,
+                          left: 10,
+                          child: Container(
+                            padding:
+                                EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.75),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.auto_awesome_rounded,
+                                    size: 12, color: Colors.white),
+                                SizedBox(width: 4),
+                                Text(
+                                  'AI illustration',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.2,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),

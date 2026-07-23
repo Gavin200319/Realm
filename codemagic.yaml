@@ -13,6 +13,7 @@ workflows:
         #   SUPABASE_URL
         #   SUPABASE_ANON_KEY
         #   MAPBOX_ACCESS_TOKEN
+        #   OPENAI_API_KEY (optional — leave unset in Codemagic to skip it)
     scripts:
       - name: Generate missing Android platform folder
         script: |
@@ -53,6 +54,7 @@ workflows:
           SUPABASE_URL=$SUPABASE_URL
           SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY
           MAPBOX_ACCESS_TOKEN=$MAPBOX_ACCESS_TOKEN
+          OPENAI_API_KEY=$OPENAI_API_KEY
           DEFAULT_UNLOCK_RADIUS_M=50
           EOF
       - name: Get Flutter packages

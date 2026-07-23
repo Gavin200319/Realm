@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 /// Which tier a source belongs to — drives both sort order and the
 /// little badge on each card. Kenya stories always sort ahead of
 /// Africa/world ones (see [NewsService]), which is the actual point
@@ -33,17 +35,72 @@ class NewsArticle {
   final String? category; // e.g. "Entertainment", "Politics" — optional
   final DateTime publishedAt;
 
+  /// Attribution line for [imageUrl], e.g. "Photo: BBC" or a named
+  /// photo credit when the source page exposes one. Only ever set
+  /// when the image came from [ArticleImageService]'s fallback
+  /// lookup rather than the RSS feed itself — a feed-supplied image
+  /// is already understood to belong to that story via the
+  /// publisher, same as it would on their own site.
+  final String? imageCredit;
+
+  /// Set only when no real image could be found anywhere (not in the
+  /// feed, not on the publisher's own page) and [GeneratedImageService]
+  /// produced an illustrative stand-in instead. Deliberately kept
+  /// separate from [imageUrl]/[imageCredit] — a generated image is a
+  /// different kind of thing than a photo and the UI always has to
+  /// label it as such, never blend it in as if it were real.
+  final Uint8List? generatedImageBytes;
+
   NewsArticle({
     required this.id,
     required this.title,
     this.summary,
     required this.link,
     this.imageUrl,
+    this.imageCredit,
+    this.generatedImageBytes,
     required this.sourceName,
     required this.tier,
     this.category,
     required this.publishedAt,
   });
+
+  /// Returns a copy with a resolved fallback image + credit applied.
+  /// Used by the Updates tab once [ArticleImageService] finds an
+  /// image for a story whose feed entry didn't include one.
+  NewsArticle withResolvedImage({
+    required String imageUrl,
+    String? imageCredit,
+  }) {
+    return NewsArticle(
+      id: id,
+      title: title,
+      summary: summary,
+      link: link,
+      imageUrl: imageUrl,
+      imageCredit: imageCredit,
+      sourceName: sourceName,
+      tier: tier,
+      category: category,
+      publishedAt: publishedAt,
+    );
+  }
+
+  /// Returns a copy carrying an AI-generated illustration, used only
+  /// as a last resort when [withResolvedImage] found nothing real.
+  NewsArticle withGeneratedImage(Uint8List bytes) {
+    return NewsArticle(
+      id: id,
+      title: title,
+      summary: summary,
+      link: link,
+      generatedImageBytes: bytes,
+      sourceName: sourceName,
+      tier: tier,
+      category: category,
+      publishedAt: publishedAt,
+    );
+  }
 
   Map<String, dynamic> toMap() => {
         'id': id,
@@ -51,6 +108,7 @@ class NewsArticle {
         'summary': summary,
         'link': link,
         'image_url': imageUrl,
+        'image_credit': imageCredit,
         'source_name': sourceName,
         'tier': tier.name,
         'category': category,
@@ -64,6 +122,7 @@ class NewsArticle {
       summary: map['summary'] as String?,
       link: map['link'] as String,
       imageUrl: map['image_url'] as String?,
+      imageCredit: map['image_credit'] as String?,
       sourceName: map['source_name'] as String? ?? '',
       tier: _tierFromName(map['tier'] as String? ?? 'kenya'),
       category: map['category'] as String?,
