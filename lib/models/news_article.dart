@@ -142,4 +142,17 @@ class NewsArticle {
     if (diff.inDays < 7) return '${diff.inDays}d ago';
     return '${(diff.inDays / 7).floor()}w ago';
   }
+
+  /// No feed exposes an actual "this is breaking" flag — outlets just
+  /// prefix the headline itself, so this is a best-effort read of that
+  /// same convention rather than anything structured. Deliberately
+  /// only checks the very start of the title: "breaking" showing up
+  /// mid-headline ("...after the breaking of talks...") shouldn't
+  /// count, only an editor actually tagging the story as breaking.
+  static final _breakingPrefixes = RegExp(
+    r'^(breaking\s*news?|breaking|just\s*in|urgent|live\s*updates?|live)\s*[:\-–—]',
+    caseSensitive: false,
+  );
+
+  bool get isBreaking => _breakingPrefixes.hasMatch(title.trim());
 }

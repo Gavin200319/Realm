@@ -25,6 +25,13 @@ class NewsService {
   NewsService._();
   static final NewsService instance = NewsService._();
 
+  // Sports/Business/Technology feeds below follow the same URL pattern
+  // The Standard already uses for headlines/entertainment, and BBC's
+  // long-stable topic-feed convention. Like every feed here, a stale
+  // or renamed URL just yields zero stories for that topic (see
+  // _fetchFeed's catchError below) rather than breaking the tab —
+  // worth spot-checking these specific ones after adding them, since
+  // they haven't been hit from this codebase before.
   static final List<_NewsFeed> _feeds = [
     // Kenya — general news
     _NewsFeed('https://www.kenyans.co.ke/feeds/news', 'Kenyans.co.ke',
@@ -36,12 +43,32 @@ class NewsService {
     _NewsFeed('https://www.standardmedia.co.ke/rss/entertainment.php',
         'The Standard', NewsTier.kenya,
         category: 'Entertainment'),
+    // Kenya — sports
+    _NewsFeed('https://www.standardmedia.co.ke/rss/sports.php',
+        'The Standard', NewsTier.kenya,
+        category: 'Sports'),
+    // Kenya — business
+    _NewsFeed('https://www.standardmedia.co.ke/rss/business.php',
+        'The Standard', NewsTier.kenya,
+        category: 'Business'),
     // Africa
     _NewsFeed('https://feeds.bbci.co.uk/news/world/africa/rss.xml',
         'BBC Africa', NewsTier.africa),
+    // Africa — sports
+    _NewsFeed('https://feeds.bbci.co.uk/sport/africa/rss.xml', 'BBC Sport',
+        NewsTier.africa,
+        category: 'Sports'),
     // World
     _NewsFeed(
         'https://feeds.bbci.co.uk/news/world/rss.xml', 'BBC News', NewsTier.world),
+    // World — business
+    _NewsFeed('https://feeds.bbci.co.uk/news/business/rss.xml', 'BBC News',
+        NewsTier.world,
+        category: 'Business'),
+    // World — technology
+    _NewsFeed('https://feeds.bbci.co.uk/news/technology/rss.xml', 'BBC News',
+        NewsTier.world,
+        category: 'Technology'),
   ];
 
   final _client = http.Client();
